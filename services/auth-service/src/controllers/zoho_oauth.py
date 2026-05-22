@@ -6,6 +6,7 @@ from src.Config.settings import settings
 class ZohoOAuth:
     def build_authorization_url(self) -> str:
         scopes = [
+            "ZohoProjects.portals.READ",
             "ZohoProjects.projects.READ",
             "ZohoProjects.tasks.ALL",
             "ZohoProjects.users.READ",
@@ -69,12 +70,18 @@ class ZohoOAuth:
         # Zoho user profile fields
         email = res_data.get("Email") or res_data.get("email")
         name = res_data.get("Display_Name") or res_data.get("name") or res_data.get("display_name")
-        zoho_user_id = res_data.get("ZAUID") or res_data.get("zauid") or res_data.get("id")
+        zoho_user_id = (
+            res_data.get("ZAUID")
+            or res_data.get("zauid")
+            or res_data.get("ZUID")
+            or res_data.get("zuid")
+            or res_data.get("id")
+        )
 
         if not zoho_user_id or not email:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Zoho user info missing key properties (ZAUID/Email). Response: {res_data}"
+                detail=f"Zoho user info missing key properties (ZAUID/ZUID/Email). Response: {res_data}"
             )
 
         return {
