@@ -1,6 +1,7 @@
 from contextlib import asynccontextmanager
 import logging
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from src.Config.settings import settings
@@ -75,6 +76,13 @@ app.add_middleware(
 
 # Include Authentication Routing
 app.include_router(auth_router, prefix="/auth", tags=["auth"])
+
+@app.get("/zoho/callback")
+async def zoho_callback_redirect(request: Request):
+    # Redirect to /auth/callback with the same query parameters
+    query_params = request.url.query
+    url = f"/auth/callback?{query_params}" if query_params else "/auth/callback"
+    return RedirectResponse(url=url)
 
 @app.get("/")
 async def root():
