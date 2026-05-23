@@ -37,4 +37,14 @@ class Settings(BaseSettings):
     FRONTEND_URL: str
     ENVIRONMENT: str = "development"
 
+    # Groq API
+    GROQ_API_KEY: str
+    MODEL: str
+    FALL_BACK_MODEL: str
+
+    # Google Embedding API
+    GOOGLE_API_KEY: str
+
 settings = Settings()
+
+
