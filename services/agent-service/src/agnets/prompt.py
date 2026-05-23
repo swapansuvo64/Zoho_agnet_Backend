@@ -29,15 +29,25 @@ JSON Format:
 }}
 """
 
-def get_main_agent_system_prompt(summary: str, context_str: str) -> str:
-    return f"""You are a helpful, professional AI Chat Agent.
+def get_main_agent_system_prompt(summary: str, stm_context_str: str, ltm_context_str: str, user_info: dict = None) -> str:
+    user_header = ""
+    if user_info:
+        name = user_info.get("name")
+        email = user_info.get("email")
+        if name or email:
+            user_header = f"\nYou are currently chatting with User: {name or 'N/A'} (Email: {email or 'N/A'}). Please address them by their name when appropriate.\n"
+
+    return f"""You are a helpful, professional AI Chat Agent.{user_header}
 You are interacting with the user in real-time.
 
 Current Running Conversation Summary:
 {summary}
 
-Relevant Context retrieved from past conversation in this session:
-{context_str}
+[Historical Memory - Relevant Past Sessions]
+{ltm_context_str}
 
-Please answer the user's message using the context and running summary to maintain continuity.
+[Current Session Context - Relevant Recent Messages]
+{stm_context_str}
+
+Please answer the user's message using the historical memory, current session context, and running summary to maintain continuity.
 """

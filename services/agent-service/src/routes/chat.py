@@ -2,7 +2,7 @@ import asyncio
 import json
 import uuid
 import logging
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, WebSocketException, Depends, Query, status
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, WebSocketException, Depends, Query, Request, status
 from fastapi.responses import JSONResponse
 from src.controllers.jwt_handler import jwt_handler
 from src.Config.redis import get_redis, get_value, delete_value
@@ -13,6 +13,9 @@ save_chat_message = longterm_memory.save_chat_message
 load_chat_history = longterm_memory.load_chat_history
 save_chat_summary = longterm_memory.save_chat_summary
 load_chat_summary = longterm_memory.load_chat_summary
+migrate_session_to_ltm = longterm_memory.migrate_session_to_ltm
+vectorize_session_summary = longterm_memory.vectorize_session_summary
+search_long_term_memory = longterm_memory.search_long_term_memory
 
 shortterm_memory_mod = importlib.import_module("src.memory.shortterm-memory")
 short_term_memory = shortterm_memory_mod.short_term_memory
@@ -48,11 +51,22 @@ async def websocket_chat_endpoint(
     
     user_id = None
     new_messages = []
+    user_info = None
     
     try:
         # Authenticate user
         user_id = await get_ws_user_id(websocket, token)
         logger.info(f"WebSocket client authenticated successfully. user_id={user_id}, session_id={session_id}")
+        
+        # Query user details from Supabase SQL table 'users'
+        try:
+            db = await get_db()
+            user_res = await db.table("users").select("name, email").eq("id", user_id).execute()
+            if user_res.data:
+                user_info = user_res.data[0]
+                logger.info(f"Successfully loaded user info from SQL: name='{user_info.get('name')}', email='{user_info.get('email')}'")
+        except Exception as db_err:
+            logger.error(f"Failed to query user details from database: {str(db_err)}")
     except WebSocketException as wse:
         logger.warning(f"WebSocket auth failed: {wse.reason}")
         await websocket.send_json({"type": "error", "message": wse.reason})
@@ -112,7 +126,10 @@ async def websocket_chat_endpoint(
             new_messages.append({"role": "user", "message": message_text})
             
             # 2. Retrieve semantic context from short-term memory using cosine + Jaccard re-ranking
-            context = await short_term_memory.get_context(session_id, message_text, limit=3)
+            stm_context = await short_term_memory.get_context(session_id, message_text, limit=3)
+            
+            # Retrieve semantic context from long-term memory (LTM)
+            ltm_context = await search_long_term_memory(user_id, message_text, limit=3)
             
             # 3. Fetch the running summary from Redis
             redis = await get_redis()
@@ -129,7 +146,7 @@ async def websocket_chat_endpoint(
             # 4. Stream LLM response chunk-by-chunk to the WebSocket
             full_response = ""
             await websocket.send_json({"type": "start"})
-            async for chunk in main_agent.get_response_stream(message_text, context, summary):
+            async for chunk in main_agent.get_response_stream(message_text, stm_context, ltm_context, summary, user_info):
                 full_response += chunk
                 await websocket.send_json({"type": "chunk", "text": chunk})
             await websocket.send_json({"type": "done"})
@@ -168,19 +185,21 @@ async def websocket_chat_endpoint(
             except Exception as bulk_err:
                 logger.error(f"Error bulk persisting chat history to database: {str(bulk_err)}")
 
-        # Persist active summary from Redis into Supabase database, and clear memory caches
+        # Persist active summary from Redis into Supabase database, migrate to long-term memory, and clear memory caches
         if user_id:
             try:
                 redis = await get_redis()
                 redis_key = f"summary:{session_id}"
                 cached_summary = await get_value(redis, redis_key)
                 if cached_summary:
+                    summary_text = ""
                     try:
                         summary_obj = json.loads(cached_summary)
+                        summary_text = summary_obj.get("summary", "")
                         await save_chat_summary(
                             user_id=user_id,
                             session_id=session_id,
-                            summary=summary_obj.get("summary", ""),
+                            summary=summary_text,
                             projects_mentioned=summary_obj.get("projects_mentioned", []),
                             tasks_mentioned=summary_obj.get("tasks_mentioned", []),
                             actions_taken=summary_obj.get("actions_taken", []),
@@ -189,11 +208,24 @@ async def websocket_chat_endpoint(
                         logger.info(f"Saved final chat summary to long-term database for session {session_id}")
                     except Exception as summary_save_err:
                         logger.error(f"Error parsing/saving final summary: {str(summary_save_err)}")
+
+                    # Migrate the short-term memory vectors to long-term memory vector store before clearing STM
+                    try:
+                        await migrate_session_to_ltm(user_id, session_id)
+                    except Exception as migration_err:
+                        logger.error(f"Error migrating STM to LTM: {str(migration_err)}")
+
+                    # Vectorize the final session summary and save to LTM Chroma
+                    if summary_text:
+                        try:
+                            await vectorize_session_summary(user_id, session_id, summary_text)
+                        except Exception as sum_vec_err:
+                            logger.error(f"Error vectorizing session summary for LTM: {str(sum_vec_err)}")
                     
                     # Clean up Redis summary
                     await delete_value(redis, redis_key)
             except Exception as redis_err:
-                logger.error(f"Error checking summary during disconnect: {str(redis_err)}")
+                logger.error(f"Error processing long-term memory updates during disconnect: {str(redis_err)}")
         
         # Clean up temporary Redis cache and Chroma memory collection
         try:
@@ -224,4 +256,29 @@ async def get_session_summary(session_id: str, db = Depends(get_db)):
             return JSONResponse(content={"summary": res.data[0]})
         return JSONResponse(content={"summary": None})
     except Exception as e:
+        return JSONResponse(content={"error": str(e)}, status_code=500)
+
+@router.get("/sessions")
+async def get_user_sessions(request: Request, token: str = Query(None), db = Depends(get_db)):
+    """Return all chat sessions (with summaries) for the authenticated user."""
+    try:
+        # Support both cookie auth and ?token= query param
+        access_token = token or request.cookies.get("access_token")
+        if not access_token:
+            return JSONResponse(content={"error": "Missing access token"}, status_code=401)
+        
+        payload = jwt_handler.verify_token(access_token, "access")
+        user_id = payload.get("sub")
+        if not user_id:
+            return JSONResponse(content={"error": "Invalid token"}, status_code=401)
+        
+        res = await db.table("chat_summaries")\
+            .select("session_id, summary, total_turns, created_at, updated_at")\
+            .eq("user_id", user_id)\
+            .order("created_at", desc=True)\
+            .execute()
+        
+        return JSONResponse(content={"sessions": res.data or []})
+    except Exception as e:
+        logger.error(f"Error fetching user sessions: {str(e)}")
         return JSONResponse(content={"error": str(e)}, status_code=500)

@@ -23,6 +23,10 @@ class Settings(BaseSettings):
     # Redis configurations
     REDIS_URL: str
 
+    # ChromaDB configurations
+    CHROMA_HOST: str = "localhost"
+    CHROMA_PORT: int = 8010
+
     # Cryptography
     ENCRYPTION_KEY: str
 

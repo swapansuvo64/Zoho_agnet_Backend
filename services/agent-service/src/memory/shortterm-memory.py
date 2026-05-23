@@ -130,6 +130,13 @@ class ShortTermMemory:
         except Exception as e:
             logger.error(f"Error in short term memory seed_session: {str(e)}")
 
+    def get_all_messages(self, session_id: str) -> list[dict]:
+        try:
+            return chroma_memory.get_all_messages(session_id)
+        except Exception as e:
+            logger.error(f"Error in short term memory get_all_messages: {str(e)}")
+            return []
+
     async def clear_session(self, session_id: str):
         try:
             redis = await get_redis()

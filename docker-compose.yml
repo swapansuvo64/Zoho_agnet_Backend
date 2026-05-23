@@ -7,6 +7,17 @@ services:
     volumes:
       - redis_data:/data
     restart: unless-stopped
+  chromadb:
+    image: chromadb/chroma:latest
+    ports:
+      - "8010:8000"
+    volumes:
+      - chroma_data:/chroma/chroma
+    environment:
+      - ANONYMIZED_TELEMETRY=False
+      - IS_PERSISTENT=TRUE
+    restart: unless-stopped
 
 volumes:
   redis_data:
+  chroma_data:

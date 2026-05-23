@@ -34,6 +34,18 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Failed to connect to Redis: {str(e)}. Proceeding anyway...")
 
+    # 2.5 Initialize & Test ChromaDB client
+    logger.info("Connecting to ChromaDB...")
+    try:
+        from src.Config.chromadb_client import chroma_client
+        if chroma_client:
+            hb = chroma_client.heartbeat()
+            logger.info(f"Connected to ChromaDB successfully. Heartbeat: {hb}")
+        else:
+            logger.warning("ChromaDB HttpClient not initialized.")
+    except Exception as e:
+        logger.warning(f"Failed to connect to ChromaDB: {str(e)}. Proceeding anyway...")
+
     # 3. Eagerly load fallback SentenceTransformer model
     logger.info("Loading fallback embedding model...")
     try:

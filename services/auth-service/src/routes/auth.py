@@ -178,3 +178,17 @@ async def me(user_id: str = Depends(get_current_user), db: AsyncClient = Depends
         )
 
     return res.data[0]
+
+@router.get("/token")
+async def get_token(request: Request):
+    """Return the raw access token from HttpOnly cookie.
+    Used by the frontend to pass the token as a query param for WebSocket connections."""
+    access_token = request.cookies.get("access_token")
+    if not access_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing access token cookie."
+        )
+    # Verify token is still valid before returning it
+    jwt_handler.verify_token(access_token, "access")
+    return {"token": access_token}
