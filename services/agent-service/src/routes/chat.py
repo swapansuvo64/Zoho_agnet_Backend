@@ -38,6 +38,7 @@ load_chat_summary = longterm_memory.load_chat_summary
 migrate_session_to_ltm = longterm_memory.migrate_session_to_ltm
 vectorize_session_summary = longterm_memory.vectorize_session_summary
 search_long_term_memory = longterm_memory.search_long_term_memory
+write_message_to_ltm = longterm_memory.write_message_to_ltm
 
 shortterm_memory_mod = importlib.import_module("src.memory.shortterm-memory")
 short_term_memory = shortterm_memory_mod.short_term_memory
@@ -159,6 +160,10 @@ async def websocket_chat_endpoint(
             # 1. Add message to short-term memory cache (Redis list + Chroma vector store)
             await short_term_memory.add_message(session_id, user_msg_id, "user", message_text)
             
+            # Write user message to LTM immediately (background) so cross-session recall works
+            # even if the WebSocket is never cleanly disconnected
+            asyncio.create_task(write_message_to_ltm(user_id, session_id, user_msg_id, "user", message_text))
+            
             # Accumulate in local list for bulk persist on disconnect
             new_messages.append({
                 "role": "user",
@@ -229,6 +234,9 @@ async def websocket_chat_endpoint(
             
             # 5. Add assistant response to short-term memory cache
             await short_term_memory.add_message(session_id, assistant_msg_id, "assistant", full_response)
+            
+            # Write assistant response to LTM immediately (background) so cross-session recall works
+            asyncio.create_task(write_message_to_ltm(user_id, session_id, assistant_msg_id, "assistant", full_response))
             
             # Accumulate in local list for bulk persist on disconnect
             new_messages.append({

@@ -11,8 +11,8 @@ def _normalize_task(t: dict) -> dict:
     Works for both list_tasks and get_task_details responses.
     """
     owners = t.get("details", {}).get("owners", [])
-    owner_names = [o.get("name", "") for o in owners if o.get("name") != "Unassigned"]
-    owners_details = [{"id": str(o.get("id", "")), "name": o.get("name", "")} for o in owners if o.get("name") != "Unassigned"]
+    owner_names = [o.get("full_name") or o.get("name", "") for o in owners if (o.get("full_name") or o.get("name")) != "Unassigned"]
+    owners_details = [{"id": str(o.get("id", "")), "name": o.get("full_name") or o.get("name", "")} for o in owners if (o.get("full_name") or o.get("name")) != "Unassigned"]
 
     status = t.get("status", {})
     tasklist = t.get("tasklist", {})
@@ -78,7 +78,7 @@ class ListTasksTool(BaseZohoTool):
                     raw_tasks = data.get("tasks", [])
                     tasks = [_normalize_task(t) for t in raw_tasks]
                     logger.info(f"Retrieved {len(tasks)} tasks for project {project_id} from Zoho.")
-                    return {"success": True, "tasks": tasks, "count": len(tasks)}
+                    return {"success": True, "project_id": project_id, "tasks": tasks, "count": len(tasks)}
                 else:
                     logger.error(f"Failed to list Zoho tasks: {resp.status_code} - {resp.text}")
                     return {"success": False, "error": f"Status {resp.status_code}: {resp.text}"}

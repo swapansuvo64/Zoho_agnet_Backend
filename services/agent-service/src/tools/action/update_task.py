@@ -41,7 +41,7 @@ class UpdateTaskTool(BaseZohoTool):
                     tasks = res_data.get("tasks", [])
                     task = tasks[0] if tasks else res_data
                     logger.info(f"Successfully updated task {task_id} in project {project_id}.")
-                    return {"success": True, "task": task}
+                    return {"success": True, "project_id": project_id, "task": task}
                 else:
                     logger.error(f"Failed to update Zoho task: {resp.status_code} - {resp.text}")
                     return {"success": False, "error": f"Status {resp.status_code}: {resp.text}"}

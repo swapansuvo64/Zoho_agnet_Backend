@@ -36,7 +36,7 @@ class CreateTaskTool(BaseZohoTool):
                     tasks = res_data.get("tasks", [])
                     task = tasks[0] if tasks else res_data
                     logger.info(f"Successfully created task '{name}' in project {project_id}.")
-                    return {"success": True, "task": task}
+                    return {"success": True, "project_id": project_id, "task": task}
                 else:
                     logger.error(f"Failed to create Zoho task: {resp.status_code} - {resp.text}")
                     return {"success": False, "error": f"Status {resp.status_code}: {resp.text}"}

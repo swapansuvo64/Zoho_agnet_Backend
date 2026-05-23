@@ -62,9 +62,40 @@ class MainAgent:
         # ── Step 1: Check if this is a Human-in-the-Loop confirmation/cancellation ──
         redis = await get_redis()
         pending_key = f"pending_action:{session_id}"
+        pending_multi_key = f"pending_actions:{session_id}"
         has_pending = await redis.exists(pending_key)
+        has_multi_pending = await redis.exists(pending_multi_key)
 
-        if has_pending:
+        if has_multi_pending:
+            normalized = query.strip().lower().rstrip(".")
+            if normalized in CONFIRM_KEYWORDS:
+                if not zoho_access_token:
+                    yield "⚠️ I couldn't retrieve your Zoho access token. Please reconnect or re-authenticate."
+                    return
+                
+                yield "💭 *Just give me a moment... processing your confirmation and executing batch updates on Zoho Projects in parallel.*\n\n"
+                await asyncio.sleep(0.4)
+                
+                from src.agnets.orchestrator_agent import orchestrator_agent
+                response = await orchestrator_agent.execute_pending_actions(
+                    session_id=session_id,
+                    access_token=zoho_access_token,
+                    approved=True
+                )
+                yield response
+                return
+            elif normalized in DECLINE_KEYWORDS:
+                await redis.delete(pending_multi_key)
+                yield "❌ **Action Aborted.** The pending multi-task write operations have been canceled cleanly."
+                return
+            else:
+                yield (
+                    "⚠️ You have a **pending multi-task action** awaiting your confirmation.\n\n"
+                    "Please reply **\"Yes\"** to proceed or **\"No\"** to cancel before continuing."
+                )
+                return
+
+        elif has_pending:
             normalized = query.strip().lower().rstrip(".")
             if normalized in CONFIRM_KEYWORDS:
                 if not zoho_access_token:
@@ -168,8 +199,8 @@ class MainAgent:
                 yield "⚠️ I couldn't retrieve your Zoho access token. Please reconnect or re-authenticate."
                 return
             
-            yield "💭 *Just give me a moment... let me analyze your request and check Zoho Projects.*\n\n"
-            await asyncio.sleep(0.4)
+            yield "💭 *Analyzing your request...*\n\n"
+            await asyncio.sleep(0.3)
             
             from src.agnets.query_agent import query_graph
             initial_state = {
@@ -182,6 +213,7 @@ class MainAgent:
                 "response": None,
                 "error": None,
                 "stm_context": stm_context,
+                "ltm_context": ltm_context,   # ← cross-session vector DB recall
                 "summary": summary
             }
             
@@ -191,13 +223,17 @@ class MainAgent:
                     state = event["route_query"]
                     if state.get("tool") and not state.get("clarification_needed"):
                         yield f"⚙️ *Using Tool:* `{state['tool']}`\n\n"
-                        await asyncio.sleep(0.4)
+                        await asyncio.sleep(0.2)
+                        yield "📡 *Fetching data from Zoho Projects...*\n\n"
+                        await asyncio.sleep(0.2)
                 elif "execute_tool" in event:
                     state = event["execute_tool"]
                     if tool_info is not None:
                         tool_info["tool_name"] = state.get("tool")
                         tool_info["tool_args"] = state.get("args")
                         tool_info["tool_result"] = state.get("tool_result")
+                    yield "✍️ *Formatting your results...*\n\n"
+                    await asyncio.sleep(0.2)
                 elif "explain" in event:
                     state = event["explain"]
                     if state.get("response"):
@@ -219,8 +255,8 @@ class MainAgent:
                 yield "⚠️ I couldn't retrieve your Zoho access token. Please reconnect or re-authenticate."
                 return
             
-            yield "💭 *Just give me a moment... let me parse this action to build a scheduled task write.*\n\n"
-            await asyncio.sleep(0.4)
+            yield "💭 *Understanding your request...*\n\n"
+            await asyncio.sleep(0.3)
             
             from src.agnets.action_agent import action_graph
             initial_state = {
@@ -236,6 +272,7 @@ class MainAgent:
                 "response": None,
                 "error": None,
                 "stm_context": stm_context,
+                "ltm_context": ltm_context,   # ← cross-session vector DB recall
                 "summary": summary
             }
             
@@ -245,7 +282,9 @@ class MainAgent:
                     state = event["parse_action"]
                     if state.get("action") and not state.get("clarification_needed"):
                         yield f"⚙️ *Using Tool:* `{state['action']}`\n\n"
-                        await asyncio.sleep(0.4)
+                        await asyncio.sleep(0.2)
+                        yield "🔐 *Preparing confirmation for your approval...*\n\n"
+                        await asyncio.sleep(0.2)
                     if tool_info is not None:
                         tool_info["tool_name"] = state.get("action")
                         tool_info["tool_args"] = state.get("args")
@@ -264,7 +303,31 @@ class MainAgent:
                 yield final_response
             return
 
+        if intent == "orchestration":
+            if not zoho_access_token:
+                yield "⚠️ I couldn't retrieve your Zoho access token. Please reconnect or re-authenticate."
+                return
+            
+            yield "💭 *Analyzing your multi-step request...*\n\n"
+            await asyncio.sleep(0.3)
+            yield "🔀 *Planning parallel agent execution...*\n\n"
+            await asyncio.sleep(0.2)
+            
+            from src.agnets.orchestrator_agent import orchestrator_agent
+            response = await orchestrator_agent.initiate_orchestration(
+                query=query,
+                session_id=session_id,
+                access_token=zoho_access_token,
+                stm_context=stm_context,
+                summary=summary
+            )
+            yield response
+            return
+
         # ── Step 4: Conversational — stream directly with memory context ──
+        yield "💭 *Thinking...*\n\n"
+        await asyncio.sleep(0.2)
+
         stm_context_str = (
             "\n".join(f"- {c}" for c in stm_context)
             if stm_context
@@ -290,8 +353,28 @@ class MainAgent:
             else "No relevant historical past session memory found."
         )
 
+        import importlib
+        shortterm_memory_mod = importlib.import_module("src.memory.shortterm-memory")
+        short_term_memory = shortterm_memory_mod.short_term_memory
+        
+        try:
+            history = await short_term_memory.get_temporary_history(session_id)
+            past_msgs = history
+            if past_msgs and past_msgs[-1].get("message") == query:
+                past_msgs = past_msgs[:-1]
+            last_5 = past_msgs[-5:]
+            chrono_items = []
+            for msg in last_5:
+                role = "User" if msg.get("role") == "user" else "Assistant"
+                text = msg.get("message", "")
+                chrono_items.append(f"{role}: {text}")
+            chrono_context_str = "\n".join(chrono_items) if chrono_items else "No preceding messages in the current session."
+        except Exception as e:
+            logger.error(f"Error fetching chronological history: {str(e)}")
+            chrono_context_str = "No preceding messages in the current session."
+
         system_prompt = get_main_agent_system_prompt(
-            summary, stm_context_str, ltm_context_str, user_info
+            summary, stm_context_str, ltm_context_str, user_info, chrono_context_str
         )
 
         messages = [

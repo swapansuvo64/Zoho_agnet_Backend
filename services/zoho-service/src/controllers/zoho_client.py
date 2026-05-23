@@ -42,12 +42,19 @@ async def _get(url: str, token: str) -> dict:
         raise HTTPException(status_code=503, detail=f"Zoho API unreachable: {str(e)}")
 
 
+_PORTAL_ID_CACHE = None
+
+
 async def _get_portal_id(token: str) -> str:
+    global _PORTAL_ID_CACHE
+    if _PORTAL_ID_CACHE is not None:
+        return _PORTAL_ID_CACHE
     data = await _get(f"{BASE}/portals/", token)
     portals = data.get("portals", [])
     if not portals:
         raise HTTPException(status_code=502, detail="No Zoho portals found for this account.")
-    return str(portals[0]["id"])
+    _PORTAL_ID_CACHE = str(portals[0]["id"])
+    return _PORTAL_ID_CACHE
 
 
 # ─────────────────────────────────────────────────────────────
@@ -101,7 +108,17 @@ def _norm_project(p: dict) -> dict:
 
 def _norm_task(t: dict) -> dict:
     owners = t.get("details", {}).get("owners", [])
-    assigned = [o.get("name", "") for o in owners if o.get("name") not in ("Unassigned", "")]
+    assigned = [
+        {
+            "name": o.get("full_name") or o.get("name", ""),
+            "zpuid": str(o.get("zpuid", "")),
+            "email": o.get("email", ""),
+            "id": str(o.get("id", "")),
+            "work": str(o.get("work", ""))
+        }
+        for o in owners
+        if (o.get("full_name") or o.get("name")) not in ("Unassigned", "", None)
+    ]
     status = t.get("status", {})
     tasklist = t.get("tasklist", {})
     log_hours = t.get("log_hours", {})

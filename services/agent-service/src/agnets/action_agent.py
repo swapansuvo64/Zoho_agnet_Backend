@@ -24,6 +24,7 @@ class ActionAgentState(TypedDict):
     access_token: Optional[str]
     approved: Optional[bool]
     stm_context: Optional[list[str]]
+    ltm_context: Optional[list[dict]]   # cross-session vector DB results
     summary: Optional[str]
     
     # Internal & Outputs
@@ -50,15 +51,32 @@ def route_decision(state: ActionAgentState) -> str:
 async def parse_action_node(state: ActionAgentState) -> dict:
     query = state["query"]
     stm_context = state.get("stm_context") or []
+    ltm_context = state.get("ltm_context") or []
     summary = state.get("summary") or ""
     
-    # Format current summary and short-term chat context for the LLM
+    # Format current summary, short-term, and long-term memory for the LLM
     context_str = ""
     if summary:
         context_str += f"[Conversation entity details / Active project context]:\n{summary}\n\n"
     if stm_context:
-        context_str += "[Recent Chat History context]:\n"
+        context_str += "[Recent Chat History — current session]:\n"
         context_str += "\n".join(stm_context) + "\n\n"
+    if ltm_context:
+        ltm_lines = []
+        for item in ltm_context:
+            text = item.get("text", "")
+            meta = item.get("metadata", {}) or {}
+            role = meta.get("role", "")
+            sid  = meta.get("session_id", "")
+            m_type = meta.get("type", "message")
+            if m_type == "summary":
+                ltm_lines.append(f"- [Past session summary (session {sid})]: {text}")
+            else:
+                prefix = f" ({role})" if role else ""
+                ltm_lines.append(f"- [Past message{prefix} (session {sid})]: {text}")
+        if ltm_lines:
+            context_str += "[Long-term memory — past sessions, semantically relevant]:\n"
+            context_str += "\n".join(ltm_lines) + "\n\n"
 
     messages = [
         SystemMessage(content=ACTION_PARSING_PROMPT),

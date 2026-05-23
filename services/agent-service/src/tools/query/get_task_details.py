@@ -27,7 +27,7 @@ class GetTaskDetailsTool(BaseZohoTool):
                     raw_task = tasks[0] if tasks else data
                     task = _normalize_task(raw_task)
                     logger.info(f"Retrieved details for task {task_id}.")
-                    return {"success": True, "task": task}
+                    return {"success": True, "project_id": project_id, "task": task}
                 else:
                     logger.error(f"Failed to fetch task details: {resp.status_code} - {resp.text}")
                     return {"success": False, "error": f"Status {resp.status_code}: {resp.text}"}

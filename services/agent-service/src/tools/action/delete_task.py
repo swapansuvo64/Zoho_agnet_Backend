@@ -20,7 +20,7 @@ class DeleteTaskTool(BaseZohoTool):
                 resp = await client.delete(url, headers=self.headers)
                 if resp.status_code == 200:
                     logger.info(f"Successfully deleted task {task_id} under project {project_id}.")
-                    return {"success": True, "message": f"Task {task_id} deleted successfully."}
+                    return {"success": True, "project_id": project_id, "task_id": task_id, "message": f"Task {task_id} deleted successfully."}
                 else:
                     logger.error(f"Failed to delete Zoho task: {resp.status_code} - {resp.text}")
                     return {"success": False, "error": f"Status {resp.status_code}: {resp.text}"}

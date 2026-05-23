@@ -33,7 +33,7 @@ JSON Format:
 """
 
 # 2. Main Agent System Prompt
-def get_main_agent_system_prompt(summary: str, stm_context_str: str, ltm_context_str: str, user_info: dict = None) -> str:
+def get_main_agent_system_prompt(summary: str, stm_context_str: str, ltm_context_str: str, user_info: dict = None, chrono_context_str: str = "") -> str:
     user_header = ""
     if user_info:
         name = user_info.get("name")
@@ -59,46 +59,93 @@ Current Running Conversation Summary:
 [Current Session Context — Relevant Recent Messages]
 {stm_context_str}
 
+[Current Session History (Chronological — Last 5 Messages)]
+{chrono_context_str}
+
 Respond naturally, concisely, and professionally to the user. Reference their name and historical context wherever it helps continuity.
 """
 
 # 3. Intent Classification Prompt
 CLASSIFY_INTENT_PROMPT = """You are an intent classifier for a Zoho Projects AI Agent.
-Classify the user's message into exactly ONE of these three categories:
+Classify the user's message into exactly ONE of these four categories:
 
-- "query": The user wants to READ or RETRIEVE data from Zoho Projects.
-  Examples: list projects, show tasks, get task details, who is in this project, how many tasks, what's the status
-- "action": The user wants to WRITE, MODIFY, or DELETE data in Zoho Projects.
+- "query": The user wants to READ or RETRIEVE data from Zoho Projects. This includes all data retrieval follow-up requests, even if they refer to preceding/above messages or tasks (e.g., "now show its utilisation", "give me utilisation of the upper task", "show details of the above task", "get the status again").
+  Examples: list projects, show tasks, get task details, who is in this project, how many tasks, what's the status, give utilisation of this task
+- "action": The user wants to WRITE, MODIFY, or DELETE data in Zoho Projects for a single task.
   Examples: create a task, update a task, delete a task, assign someone, change status
+- "orchestration": The user wants to execute a complex multi-step request combining reading (retrieving tasks/details) and then conditionally writing/modifying them based on retrieved data.
+  Examples: see this task and whatever task is not completed add a message as do fast, find all tasks assigned to X and set status to closed, check project Y tasks and append description
 - "conversational": The user is having general conversation, asking meta questions, or discussing past topics.
   Examples: hi, thank you, what did we talk about, explain this to me, what is Zoho
 
-Respond with ONLY one word: query, action, or conversational. No explanation, no punctuation."""
+Respond with ONLY one word: query, action, orchestration, or conversational. No explanation, no punctuation."""
+
+# 3b. Orchestrator Planning Prompt
+ORCHESTRATOR_PLANNING_PROMPT = """You are the Zoho Multi-Agent Orchestrator. Your job is to analyze the user's multi-step instruction, inspect the retrieved data (e.g., project tasks), apply logical checks, and output a structured list of write actions to be executed.
+
+Available Actions:
+- create_task: Requires 'project_id' and 'name'. Optional: 'description', 'person_responsible', 'start_date', 'end_date'.
+- update_task: Requires 'project_id' and 'task_id'. Optional: 'name', 'description', 'person_responsible', 'start_date', 'end_date', 'status'.
+- delete_task: Requires 'project_id' and 'task_id'.
+
+You must inspect the provided active context and tasks list, find the tasks that match the user's conditions, and prepare the write actions list.
+For example, if the user says: "for whatever task is not completed add a message as 'do fast'", you will look for all tasks in the list that have completed=false or status_type=open, and output an "update_task" action for each of them.
+For the new values (like appending a description/message), read current attributes from the task and incorporate them if appropriate (e.g. if the user says "add a message", append or set the description to that message).
+
+You must respond with ONLY a valid JSON object matching this structure:
+{
+  "plan_description": "A brief summary of the scanning results and what operations will be executed.",
+  "actions": [
+    {
+      "action": "create_task" | "update_task" | "delete_task",
+      "args": {
+        "project_id": "...",
+        "task_id": "...",
+        "name": "...",
+        "description": "...",
+        "person_responsible": "...",
+        "start_date": "...",
+        "end_date": "...",
+        "status": "..."
+      }
+    }
+  ],
+  "clarification_needed": "If no uncompleted tasks were found or if a parameter is completely missing, write a polite prompt explaining this. Otherwise null."
+}
+Do not include markdown wrappers (like ```json), explanations, or extra text."""
 
 # 4. Query Routing Prompt
-QUERY_ROUTING_PROMPT = """You are the Zoho Query Routing Agent. Your job is to select the correct tool and extract required parameters.
+QUERY_ROUTING_PROMPT = """You are the Zoho Query Routing Agent. Your job is to select the correct tool and extract required parameters from the user query and the provided context.
+
 Available Tools:
 - list_projects: List all projects. No parameters required.
 - list_tasks: List tasks for a project. Requires 'project_id'.
-- get_task_details: Get detailed info on a single task. Requires 'project_id' and 'task_id'.
-- list_project_members: List users/members in a project. Requires 'project_id'.
-- get_task_utilisation: Get resource/timesheet logs for a task. Requires 'project_id' and 'task_id'.
+- get_task_details: Get detailed info on a single task, including its assignees/owners. Requires 'project_id' and 'task_id'.
+- list_project_members: List all members/people of a project (the full team). Requires 'project_id'.
+- get_task_utilisation: Get resource/timesheet logs for a task. Requires 'project_id' and 'task_id' (use "all" if the user asks for all tasks).
 
-CRITICAL ROUTING RULES:
-1. **Never ask for clarification when listing projects:** If the user asks general questions about their projects (e.g., "what projects are ongoing?", "active project of mine", "list all my projects", "show my workspaces"), you MUST select `list_projects` with no parameters. Set `clarification_needed` to null. Let the tool fetch all projects, and the explainer will filter or highlight the active/ongoing ones.
-2. **Only ask for clarification if a required parameter is missing for nested queries:**
-   - If the user wants to list tasks, list members, or get task logs, but has not provided a project ID/name, set `clarification_needed` to ask which project they are inquiring about.
+You will receive up to three context blocks before the user query:
+- [Conversation entity details / Active project context]: Running summary of mentioned projects and tasks with their IDs.
+- [Recent Chat History — current session]: Semantically relevant messages from the current session.
+- [Long-term memory — past sessions, semantically relevant]: Recalled messages from past sessions via vector search.
 
-You must respond with ONLY a valid JSON object matching this structure:
+ROUTING RULES:
+1. **Resolve parameters from context before asking.** Extract 'project_id' and 'task_id' from ANY of the three context blocks above. If only one project or task is mentioned across those blocks, use its ID automatically. Do NOT ask for clarification if the ID can be inferred.
+2. **Use context to determine the right tool.** The context blocks describe what the user has been working on — use that to understand what "this task", "the project", "that person" refers to.
+3. **Ask for clarification only as a last resort**, if a required parameter cannot be resolved from the query or any context block.
+4. **For "all tasks" utilisation**: set task_id to "all".
+5. **For listing all projects** ("show my projects", "what workspaces do I have"): use list_projects, no parameters.
+
+You must respond with ONLY a valid JSON object:
 {
   "tool": "list_projects" | "list_tasks" | "get_task_details" | "list_project_members" | "get_task_utilisation",
   "args": {
     "project_id": "value or null",
     "task_id": "value or null"
   },
-  "clarification_needed": "If a required parameter is missing, write a polite prompt asking the user for it. Otherwise null."
+  "clarification_needed": "Polite question to user if a parameter is truly missing, otherwise null."
 }
-Do not include markdown wrappers (like ```json), explanations, or extra text."""
+Do not include markdown wrappers, explanations, or extra text."""
 
 # 5. Query Explanation Prompt
 def get_query_explanation_prompt(query: str, tool_name: str, result_json: str) -> str:

@@ -137,3 +137,23 @@ async def search_long_term_memory(user_id: str, query_text: str, limit: int = 5)
         logger.error(f"Error searching long term memory: {str(e)}")
         return []
 
+async def write_message_to_ltm(user_id: str, session_id: str, msg_id: str, role: str, text: str):
+    """
+    Immediately embeds and writes a single message to Chroma LTM.
+    Called as a background task after every message so that memory is
+    available cross-session without waiting for WebSocket disconnect.
+    """
+    try:
+        embedding = await get_embedding(text)
+        await ltm_memory.upsert_message(
+            user_id=user_id,
+            msg_id=msg_id,
+            session_id=session_id,
+            role=role,
+            text=text,
+            embedding=embedding
+        )
+        logger.info(f"Real-time LTM write: msg_id={msg_id}, role={role}, session={session_id}")
+    except Exception as e:
+        logger.error(f"Error in real-time LTM write for msg_id={msg_id}: {str(e)}")
+

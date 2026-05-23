@@ -62,12 +62,37 @@ async def get_member(
     Called when the user clicks on a member's name/link in the chat popup.
     """
     from fastapi import HTTPException
-    members = await fetch_project_members(project_id, zoho_token)
-    for m in members:
-        if m.get("id") == member_id or m.get("zpuid") == member_id:
-            return {"success": True, "member": m}
+    
+    # 1. Attempt to fetch directly using the provided project_id
+    try:
+        members = await fetch_project_members(project_id, zoho_token)
+        for m in members:
+            if m.get("id") == member_id or m.get("zpuid") == member_id:
+                return {"success": True, "project_id": project_id, "member": m}
+    except Exception as e:
+        logger.warning(f"Direct member fetch failed for project_id={project_id}: {str(e)}. Retrying project fallback...")
+    
+    # 2. Resilient Fallback: Search across all projects if the provided project_id was wrong (e.g. LLM hallucinated tasklist ID)
+    try:
+        logger.info(f"Fallback search: Finding member_id={member_id} across all projects...")
+        projects = await fetch_projects(zoho_token)
+        for proj in projects:
+            p_id = proj.get("id")
+            if not p_id or p_id == project_id:
+                continue
+            try:
+                members = await fetch_project_members(p_id, zoho_token)
+                for m in members:
+                    if m.get("id") == member_id or m.get("zpuid") == member_id:
+                        logger.info(f"Fallback search success: Found member_id={member_id} in project_id={p_id}")
+                        return {"success": True, "project_id": p_id, "member": m}
+            except Exception:
+                continue
+    except Exception as fallback_err:
+        logger.error(f"Resilient member search fallback failed: {str(fallback_err)}")
+
     raise HTTPException(
         status_code=404,
-        detail=f"Member {member_id} not found in project {project_id}.",
+        detail=f"Member {member_id} not found in project {project_id} or fallback search.",
     )
 
