@@ -180,7 +180,9 @@ class MainAgent:
                 "clarification_needed": None,
                 "tool_result": None,
                 "response": None,
-                "error": None
+                "error": None,
+                "stm_context": stm_context,
+                "summary": summary
             }
             
             final_response = ""
@@ -232,7 +234,9 @@ class MainAgent:
                 "clarification_needed": None,
                 "tool_result": None,
                 "response": None,
-                "error": None
+                "error": None,
+                "stm_context": stm_context,
+                "summary": summary
             }
             
             final_response = ""

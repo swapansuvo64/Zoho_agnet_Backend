@@ -12,6 +12,7 @@ def _normalize_task(t: dict) -> dict:
     """
     owners = t.get("details", {}).get("owners", [])
     owner_names = [o.get("name", "") for o in owners if o.get("name") != "Unassigned"]
+    owners_details = [{"id": str(o.get("id", "")), "name": o.get("name", "")} for o in owners if o.get("name") != "Unassigned"]
 
     status = t.get("status", {})
     tasklist = t.get("tasklist", {})
@@ -43,6 +44,7 @@ def _normalize_task(t: dict) -> dict:
         "created_by_email": t.get("created_by_email", ""),
         "created_by_full_name": t.get("created_by_full_name", ""),
         "owners": owner_names,               # list of assigned person names
+        "owners_details": owners_details,
         "tasklist_name": tasklist.get("name", ""),
         "tasklist_id": tasklist.get("id", ""),
         "milestone_id": t.get("milestone_id", ""),

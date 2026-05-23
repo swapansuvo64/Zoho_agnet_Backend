@@ -182,7 +182,22 @@ async def websocket_chat_endpoint(
             if cached_summary:
                 try:
                     summary_obj = json.loads(cached_summary)
-                    summary = summary_obj.get("summary", "No summary yet.")
+                    summary_text = summary_obj.get("summary", "No summary yet.")
+                    summary_details = [f"Conversational Summary: {summary_text}"]
+                    
+                    projects = summary_obj.get("projects_mentioned", [])
+                    if projects:
+                        summary_details.append(f"Active Projects Mentioned: {', '.join(projects)}")
+                        
+                    tasks = summary_obj.get("tasks_mentioned", [])
+                    if tasks:
+                        summary_details.append(f"Active Tasks Mentioned: {', '.join(tasks)}")
+                        
+                    actions = summary_obj.get("actions_taken", [])
+                    if actions:
+                        summary_details.append(f"Actions Taken: {', '.join(actions)}")
+                        
+                    summary = "\n".join(summary_details)
                 except Exception:
                     pass
 

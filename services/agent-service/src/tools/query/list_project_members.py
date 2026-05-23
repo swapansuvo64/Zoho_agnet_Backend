@@ -22,7 +22,7 @@ class ListProjectMembersTool(BaseZohoTool):
                     data = resp.json()
                     users = data.get("users", [])
                     logger.info(f"Retrieved {len(users)} users for project {project_id}.")
-                    return {"success": True, "members": users}
+                    return {"success": True, "project_id": project_id, "members": users}
                 else:
                     logger.error(f"Failed to list project users: {resp.status_code} - {resp.text}")
                     return {"success": False, "error": f"Status {resp.status_code}: {resp.text}"}

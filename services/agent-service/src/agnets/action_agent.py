@@ -23,6 +23,8 @@ class ActionAgentState(TypedDict):
     session_id: str
     access_token: Optional[str]
     approved: Optional[bool]
+    stm_context: Optional[list[str]]
+    summary: Optional[str]
     
     # Internal & Outputs
     action: Optional[str]
@@ -47,9 +49,20 @@ def route_decision(state: ActionAgentState) -> str:
 # Node 2: Parse Action
 async def parse_action_node(state: ActionAgentState) -> dict:
     query = state["query"]
+    stm_context = state.get("stm_context") or []
+    summary = state.get("summary") or ""
+    
+    # Format current summary and short-term chat context for the LLM
+    context_str = ""
+    if summary:
+        context_str += f"[Conversation entity details / Active project context]:\n{summary}\n\n"
+    if stm_context:
+        context_str += "[Recent Chat History context]:\n"
+        context_str += "\n".join(stm_context) + "\n\n"
+
     messages = [
         SystemMessage(content=ACTION_PARSING_PROMPT),
-        HumanMessage(content=f"User Query: {query}")
+        HumanMessage(content=f"{context_str}User Query: {query}")
     ]
     try:
         resp = await llm.ainvoke(messages)
@@ -78,6 +91,7 @@ async def parse_action_node(state: ActionAgentState) -> dict:
     except Exception as e:
         logger.error(f"Error in parse_action_node: {str(e)}")
         return {"error": f"An error occurred while preparing the task write operation: {str(e)}"}
+
 
 # Node 3: Confirmation Prompt Builder
 async def confirmation_prompt_node(state: ActionAgentState) -> dict:
@@ -260,7 +274,7 @@ class ActionAgent:
     ActionAgent handles all Zoho Project write operations (create/update/delete tasks).
     Features Human-in-the-Loop workflow implemented as a LangGraph StateGraph.
     """
-    async def initiate_action(self, query: str, session_id: str) -> str:
+    async def initiate_action(self, query: str, session_id: str, stm_context: list = None, summary: str = None) -> str:
         """
         Parses intent and arguments from the user query, caches it as a pending action,
         and outputs a confirmation prompt.
@@ -276,7 +290,9 @@ class ActionAgent:
             "clarification_needed": None,
             "tool_result": None,
             "response": None,
-            "error": None
+            "error": None,
+            "stm_context": stm_context or [],
+            "summary": summary or ""
         }
         try:
             final_state = await action_graph.ainvoke(initial_state)

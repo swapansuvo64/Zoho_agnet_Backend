@@ -17,7 +17,8 @@ Analyze the new messages and integrate them into the existing state.
 - Extract any projects mentioned.
 - Extract any tasks mentioned.
 - Extract any actions taken.
-- **IMPORTANT**: When storing projects or tasks in `projects_mentioned` and `tasks_mentioned`, if there are multiple projects or tasks, store them as comma-separated strings (e.g. "Project Alpha, Project Beta") inside the array to list them by comma.
+- **IMPORTANT**: When storing projects or tasks in `projects_mentioned` and `tasks_mentioned`, you MUST always capture both their Name and their 18-digit Zoho ID if present in the text, in the format: "Project Name (ID: <project_id>)" or "Task Name (ID: <task_id>)" (e.g. "mew mew (ID: 457314000000069061)"). This preserves operational context across session disconnects.
+- **IMPORTANT**: When storing projects or tasks, if there are multiple, store them as comma-separated strings (e.g. "Project Alpha (ID: 123), Project Beta (ID: 456)") inside the array.
 - Keep the existing lists and add new items (do not delete old items, but avoid duplicates).
 
 Respond ONLY with a valid JSON object matching the format below. Do not include markdown code block formatting (like ```json), explanations, or trailing characters.
@@ -83,6 +84,11 @@ Available Tools:
 - list_project_members: List users/members in a project. Requires 'project_id'.
 - get_task_utilisation: Get resource/timesheet logs for a task. Requires 'project_id' and 'task_id'.
 
+CRITICAL ROUTING RULES:
+1. **Never ask for clarification when listing projects:** If the user asks general questions about their projects (e.g., "what projects are ongoing?", "active project of mine", "list all my projects", "show my workspaces"), you MUST select `list_projects` with no parameters. Set `clarification_needed` to null. Let the tool fetch all projects, and the explainer will filter or highlight the active/ongoing ones.
+2. **Only ask for clarification if a required parameter is missing for nested queries:**
+   - If the user wants to list tasks, list members, or get task logs, but has not provided a project ID/name, set `clarification_needed` to ask which project they are inquiring about.
+
 You must respond with ONLY a valid JSON object matching this structure:
 {
   "tool": "list_projects" | "list_tasks" | "get_task_details" | "list_project_members" | "get_task_utilisation",
@@ -103,7 +109,21 @@ Zoho API Response:
 {result_json}
 
 Please write a highly professional, well-formatted markdown response explaining the results to the user. Present lists as clean tables or bulleted lists, and highlight important fields (like status, dates, IDs) cleanly.
+
+CRITICAL CONCISENESS RULES:
+- **Keep it extremely concise, short, and clean.** DO NOT output long, bloated lists of technical metadata (e.g. strict access mode, public access, enabled tabs, task bug prefixes, bug counts, milestone details, currency symbols, raw database IDs, etc.).
+- Never dump extensive tables of metadata. Focus the chat bubble on providing a high-level summary or a neat, compact list.
+- Keep in mind that the frontend renders interactive deep-links for projects and tasks. Mention that the user can click on the highlighted project/task names to open an interactive detail popup modal with comprehensive dates, allocations, statistics, and logged timesheet hours.
+
+CRITICAL LINK FORMATTING RULES:
+- Whenever you mention a project, you MUST format its name as a clickable link using: `[Project Name](project://<project_id>)` (e.g. `[mew mew](project://457314000000069061)`).
+- Whenever you mention a task, you MUST format its name as a clickable link using: `[Task Name](task://<project_id>/<task_id>)` (e.g. `[Task A](task://457314000000069061/457314000000075001)`).
+- Whenever you mention or list a project member (user), you MUST format their name as a clickable link using: `[Member Name](member://<project_id>/<member_id>)` (e.g. `[suvadeep Bhattacharjee](member://457314000000069061/60072272629)`).
+  - When listing project members, use the `project_id` and the user/member's `id` from the API response to construct the link.
+  - When explaining task details or listing tasks, use the `project_id` and the `owners_details` array (which maps each assignee name to their `id`) to format assignee names as clickable member links.
+Always extract and use the real, complete 18-digit IDs from the Zoho response. This enables interactive popup details!
 """
+
 
 # 6. Action Parsing Prompt
 ACTION_PARSING_PROMPT = """You are the Zoho Action Parser. Your job is to analyze write requests and extract details.
@@ -137,4 +157,15 @@ Zoho API Response:
 {result_json}
 
 Please write a highly professional, well-formatted markdown response confirming the success of the operation. Highlight details of the created/updated item clearly.
+
+CRITICAL CONCISENESS RULES:
+- **Keep it extremely concise, short, and clean.** DO NOT output long, bloated lists of technical metadata (e.g. strict access mode, public access, enabled tabs, task prefixes, raw database IDs, currency symbols, etc.).
+- Highlight only the core attributes (e.g., Name, Status, Date) in a very small list or summary text.
+- Prompt the user that they can click on the highlighted project/task names to open an interactive detail popup modal with comprehensive dates, allocations, statistics, and logged timesheet hours.
+
+CRITICAL LINK FORMATTING RULES:
+- Whenever you mention a project, you MUST format its name as a clickable link using: `[Project Name](project://<project_id>)` (e.g. `[mew mew](project://457314000000069061)`).
+- Whenever you mention a task, you MUST format its name as a clickable link using: `[Task Name](task://<project_id>/<task_id>)` (e.g. `[Task A](task://457314000000069061/457314000000075001)`).
+Always extract and use the real, complete 18-digit IDs from the Zoho response. This enables interactive popup details!
 """
+

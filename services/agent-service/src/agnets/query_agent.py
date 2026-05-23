@@ -24,13 +24,26 @@ class QueryAgentState(TypedDict):
     tool_result: Optional[dict]
     response: Optional[str]
     error: Optional[str]
+    stm_context: Optional[list[str]]
+    summary: Optional[str]
 
 # Node 1: Router Node
 async def route_query_node(state: QueryAgentState) -> dict:
     query = state["query"]
+    stm_context = state.get("stm_context") or []
+    summary = state.get("summary") or ""
+    
+    # Format current summary and short-term chat context for the LLM
+    context_str = ""
+    if summary:
+        context_str += f"[Conversation entity details / Active project context]:\n{summary}\n\n"
+    if stm_context:
+        context_str += "[Recent Chat History context]:\n"
+        context_str += "\n".join(stm_context) + "\n\n"
+
     messages = [
         SystemMessage(content=QUERY_ROUTING_PROMPT),
-        HumanMessage(content=f"User Query: {query}")
+        HumanMessage(content=f"{context_str}User Query: {query}")
     ]
     try:
         resp = await llm.ainvoke(messages)
@@ -59,6 +72,7 @@ async def route_query_node(state: QueryAgentState) -> dict:
     except Exception as e:
         logger.error(f"Error in route_query_node: {str(e)}")
         return {"error": f"An error occurred during query analysis: {str(e)}"}
+
 
 # Conditional edge logic
 def router_decision(state: QueryAgentState) -> str:
@@ -162,7 +176,7 @@ class QueryAgent:
     QueryAgent handles all Zoho Project read requests.
     Implemented as a LangGraph StateGraph pipeline.
     """
-    async def process_query(self, query: str, access_token: str) -> str:
+    async def process_query(self, query: str, access_token: str, stm_context: list = None, summary: str = None) -> str:
         initial_state = {
             "query": query,
             "access_token": access_token,
@@ -171,7 +185,9 @@ class QueryAgent:
             "clarification_needed": None,
             "tool_result": None,
             "response": None,
-            "error": None
+            "error": None,
+            "stm_context": stm_context or [],
+            "summary": summary or ""
         }
         try:
             final_state = await query_graph.ainvoke(initial_state)
@@ -181,3 +197,4 @@ class QueryAgent:
             return f"An error occurred while executing the query workflow: {str(e)}"
 
 query_agent = QueryAgent()
+
