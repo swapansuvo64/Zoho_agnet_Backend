@@ -1,15 +1,51 @@
+from contextlib import asynccontextmanager
+import logging
 import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from dotenv import load_dotenv
+from src.Config.settings import settings
+from src.Config.database import init_db, get_db
+from src.Config.redis import init_redis, get_redis
 
-# Load environment variables
-load_dotenv()
+# Configure Logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+)
+logger = logging.getLogger("agent-service")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    logger.info("Initializing services on startup...")
+    
+    # 1. Initialize & Test Supabase client
+    db = None
+    logger.info("Connecting to Supabase...")
+    try:
+        db = await init_db()
+    except Exception as e:
+        logger.warning(f"Failed to connect to Supabase: {str(e)}. Proceeding anyway...")
+    
+    # 2. Initialize & Test Redis client
+    redis = None
+    logger.info("Connecting to Redis...")
+    try:
+        redis = await init_redis()
+    except Exception as e:
+        logger.warning(f"Failed to connect to Redis: {str(e)}. Proceeding anyway...")
+
+    logger.info("Agent service ready")
+    yield
+
+    # Lifespan Shutdown
+    logger.info("Shutting down agent-service...")
+    logger.info("Agent-service shutdown completed.")
 
 app = FastAPI(
     title="Zoho Agent Backend",
     description="FastAPI Backend for Zoho Agent",
-    version="0.1.0"
+    version="0.1.0",
+    lifespan=lifespan
 )
 
 # Configure CORS
@@ -24,11 +60,12 @@ app.add_middleware(
 @app.get("/")
 async def root():
     return {
+        "service": "agent-service",
         "status": "healthy",
-        "message": "Zoho Agent Backend API is running successfully!",
+        "port": 8000,
         "environment": {
-            "has_zoho_client_id": bool(os.getenv("ZOHO_Client_ID")),
-            "has_zoho_client_secret": bool(os.getenv("ZOHO_Client_Secret"))
+            "has_zoho_client_id": bool(settings.ZOHO_CLIENT_ID),
+            "has_zoho_client_secret": bool(settings.ZOHO_CLIENT_SECRET)
         }
     }
 
@@ -39,3 +76,4 @@ async def health_check():
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+
