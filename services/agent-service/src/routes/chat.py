@@ -12,6 +12,7 @@ longterm_memory = importlib.import_module("src.memory.longterm-memory")
 save_chat_message = longterm_memory.save_chat_message
 load_chat_history = longterm_memory.load_chat_history
 save_chat_summary = longterm_memory.save_chat_summary
+load_chat_summary = longterm_memory.load_chat_summary
 
 shortterm_memory_mod = importlib.import_module("src.memory.shortterm-memory")
 short_term_memory = shortterm_memory_mod.short_term_memory
@@ -70,6 +71,27 @@ async def websocket_chat_endpoint(
         logger.info(f"Seeded short-term memory for session {session_id} with {len(past_messages)} past messages.")
     except Exception as e:
         logger.error(f"Error seeding short-term memory on connection: {str(e)}")
+
+    # Seed running summary in Redis cache from database if present
+    try:
+        past_summary = await load_chat_summary(session_id)
+        if past_summary:
+            redis = await get_redis()
+            redis_key = f"summary:{session_id}"
+            exists = await redis.exists(redis_key)
+            if not exists:
+                summary_data = {
+                    "summary": past_summary.get("summary", "No summary yet."),
+                    "projects_mentioned": past_summary.get("projects_mentioned", []),
+                    "tasks_mentioned": past_summary.get("tasks_mentioned", []),
+                    "actions_taken": past_summary.get("actions_taken", []),
+                    "total_turns": past_summary.get("total_turns", 0)
+                }
+                # Set 24 hours TTL for the summary cache in Redis
+                await redis.set(redis_key, json.dumps(summary_data), ex=86400)
+                logger.info(f"Seeded summary cache for session {session_id} from database.")
+    except Exception as e:
+        logger.error(f"Error seeding running summary cache on connection: {str(e)}")
 
     # Main interaction loop
     try:

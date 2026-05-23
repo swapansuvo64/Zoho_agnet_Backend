@@ -58,3 +58,17 @@ async def save_chat_summary(
     except Exception as e:
         logger.error(f"Error saving chat summary to DB: {str(e)}")
     return None
+
+async def load_chat_summary(session_id: str) -> dict | None:
+    try:
+        db = await get_db()
+        res = await db.table("chat_summaries")\
+            .select("*")\
+            .eq("session_id", session_id)\
+            .execute()
+        if res.data:
+            return res.data[0]
+    except Exception as e:
+        logger.error(f"Error loading chat summary from DB: {str(e)}")
+    return None
+

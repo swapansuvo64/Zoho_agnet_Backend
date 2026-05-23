@@ -1,32 +1,30 @@
 import json
 import logging
-import httpx
-from src.Config.settings import settings
+from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
+from src.Config.model import llm
 from src.Config.redis import get_redis, get_value, set_value
 from src.agnets.prompt import get_summary_prompt
-
 
 logger = logging.getLogger("agent-service")
 
 async def call_groq_llm(messages: list) -> str:
-    url = "https://api.groq.com/openai/v1/chat/completions"
-    headers = {
-        "Authorization": f"Bearer {settings.GROQ_API_KEY}",
-        "Content-Type": "application/json"
-    }
-
-
-    payload = {
-        "model": settings.MODEL,
-        "messages": messages,
-        "temperature": 0.2
-    }
-    async with httpx.AsyncClient() as client:
-        resp = await client.post(url, json=payload, headers=headers, timeout=20.0)
-        if resp.status_code != 200:
-            logger.error(f"Groq API error in summary agent. Status: {resp.status_code}, Body: {resp.text}")
-        resp.raise_for_status()
-        return resp.json()["choices"][0]["message"]["content"]
+    lc_messages = []
+    for msg in messages:
+        role = msg.get("role", "user")
+        content = msg.get("content", "")
+        if role == "system":
+            lc_messages.append(SystemMessage(content=content))
+        elif role == "assistant":
+            lc_messages.append(AIMessage(content=content))
+        else:
+            lc_messages.append(HumanMessage(content=content))
+            
+    try:
+        resp = await llm.ainvoke(lc_messages)
+        return resp.content
+    except Exception as e:
+        logger.error(f"Error calling ChatGroq via LangChain in summary agent: {str(e)}")
+        raise e
 
 async def update_running_summary(session_id: str, new_user_msg: str, new_agent_msg: str):
     try:
@@ -62,7 +60,7 @@ async def update_running_summary(session_id: str, new_user_msg: str, new_agent_m
             {"role": "user", "content": prompt}
         ]
         
-        # 3. Call Groq
+        # 3. Call Groq using ChatGroq via LangChain
         response_text = await call_groq_llm(messages)
         
         # Clean response if markdown blocks are included
