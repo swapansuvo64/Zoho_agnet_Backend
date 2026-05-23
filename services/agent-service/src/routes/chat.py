@@ -52,6 +52,7 @@ async def websocket_chat_endpoint(
     user_id = None
     new_messages = []
     user_info = None
+    zoho_access_token = None
     
     try:
         # Authenticate user
@@ -67,6 +68,19 @@ async def websocket_chat_endpoint(
                 logger.info(f"Successfully loaded user info from SQL: name='{user_info.get('name')}', email='{user_info.get('email')}'")
         except Exception as db_err:
             logger.error(f"Failed to query user details from database: {str(db_err)}")
+
+        # Fetch Zoho access token from Redis (set by the auth-service OAuth flow)
+        try:
+            redis = await get_redis()
+            zoho_token_key = f"zoho_access_token:{user_id}"
+            zoho_access_token = await get_value(redis, zoho_token_key)
+            if zoho_access_token:
+                logger.info(f"Zoho access token fetched from Redis for user_id={user_id}")
+            else:
+                logger.warning(f"No Zoho access token found in Redis for user_id={user_id}. Zoho tools will be unavailable.")
+        except Exception as zoho_err:
+            logger.error(f"Failed to fetch Zoho access token from Redis: {str(zoho_err)}")
+
     except WebSocketException as wse:
         logger.warning(f"WebSocket auth failed: {wse.reason}")
         await websocket.send_json({"type": "error", "message": wse.reason})
@@ -143,10 +157,18 @@ async def websocket_chat_endpoint(
                 except Exception:
                     pass
 
-            # 4. Stream LLM response chunk-by-chunk to the WebSocket
+            # 4. Route through MainAgent brain → query_agent / action_agent / conversational LLM
             full_response = ""
             await websocket.send_json({"type": "start"})
-            async for chunk in main_agent.get_response_stream(message_text, stm_context, ltm_context, summary, user_info):
+            async for chunk in main_agent.get_response_stream(
+                query=message_text,
+                session_id=session_id,
+                stm_context=stm_context,
+                ltm_context=ltm_context,
+                summary=summary,
+                user_info=user_info,
+                zoho_access_token=zoho_access_token
+            ):
                 full_response += chunk
                 await websocket.send_json({"type": "chunk", "text": chunk})
             await websocket.send_json({"type": "done"})
