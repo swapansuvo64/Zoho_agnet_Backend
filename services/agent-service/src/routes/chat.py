@@ -2,10 +2,32 @@ import asyncio
 import json
 import uuid
 import logging
+import httpx
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, WebSocketException, Depends, Query, Request, status
 from fastapi.responses import JSONResponse
 from src.controllers.jwt_handler import jwt_handler
 from src.Config.redis import get_redis, get_value, delete_value
+from src.Config.settings import settings
+
+async def fetch_zoho_token_from_auth_service(user_id: str, access_token: str) -> str | None:
+    """
+    Calls the auth-service to fetch/refresh the Zoho access token.
+    """
+    try:
+        url = f"{settings.AUTH_SERVICE_URL.rstrip('/')}/auth/zoho/token"
+        headers = {"Authorization": f"Bearer {access_token}"}
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(url, headers=headers)
+            if response.status_code == 200:
+                data = response.json()
+                token = data.get("zoho_access_token")
+                if token:
+                    logger.info(f"Successfully retrieved Zoho access token from auth-service for user_id={user_id}")
+                    return token
+            logger.warning(f"Auth-service returned status {response.status_code}: {response.text}")
+    except Exception as e:
+        logger.error(f"Failed to call auth-service to get Zoho access token: {str(e)}")
+    return None
 
 import importlib
 longterm_memory = importlib.import_module("src.memory.longterm-memory")
@@ -54,6 +76,9 @@ async def websocket_chat_endpoint(
     user_info = None
     zoho_access_token = None
     
+    # Get the raw access token
+    access_token = token or websocket.cookies.get("access_token")
+    
     try:
         # Authenticate user
         user_id = await get_ws_user_id(websocket, token)
@@ -69,17 +94,15 @@ async def websocket_chat_endpoint(
         except Exception as db_err:
             logger.error(f"Failed to query user details from database: {str(db_err)}")
 
-        # Fetch Zoho access token from Redis (set by the auth-service OAuth flow)
+        # Fetch Zoho access token from auth-service
         try:
-            redis = await get_redis()
-            zoho_token_key = f"zoho_access_token:{user_id}"
-            zoho_access_token = await get_value(redis, zoho_token_key)
+            zoho_access_token = await fetch_zoho_token_from_auth_service(user_id, access_token)
             if zoho_access_token:
-                logger.info(f"Zoho access token fetched from Redis for user_id={user_id}")
+                logger.info(f"Zoho access token fetched from auth-service for user_id={user_id}")
             else:
-                logger.warning(f"No Zoho access token found in Redis for user_id={user_id}. Zoho tools will be unavailable.")
+                logger.warning(f"No Zoho access token found from auth-service for user_id={user_id}. Zoho tools will be unavailable.")
         except Exception as zoho_err:
-            logger.error(f"Failed to fetch Zoho access token from Redis: {str(zoho_err)}")
+            logger.error(f"Failed to fetch Zoho access token: {str(zoho_err)}")
 
     except WebSocketException as wse:
         logger.warning(f"WebSocket auth failed: {wse.reason}")
@@ -137,7 +160,13 @@ async def websocket_chat_endpoint(
             await short_term_memory.add_message(session_id, user_msg_id, "user", message_text)
             
             # Accumulate in local list for bulk persist on disconnect
-            new_messages.append({"role": "user", "message": message_text})
+            new_messages.append({
+                "role": "user",
+                "message": message_text,
+                "tool_name": None,
+                "tool_args": None,
+                "tool_result": None
+            })
             
             # 2. Retrieve semantic context from short-term memory using cosine + Jaccard re-ranking
             stm_context = await short_term_memory.get_context(session_id, message_text, limit=3)
@@ -157,9 +186,16 @@ async def websocket_chat_endpoint(
                 except Exception:
                     pass
 
+            # Fetch / refresh Zoho access token dynamically from auth-service for every turn
+            try:
+                zoho_access_token = await fetch_zoho_token_from_auth_service(user_id, access_token)
+            except Exception as zoho_err:
+                logger.error(f"Failed to fetch Zoho access token during chat turn: {str(zoho_err)}")
+
             # 4. Route through MainAgent brain → query_agent / action_agent / conversational LLM
             full_response = ""
             await websocket.send_json({"type": "start"})
+            tool_info = {"tool_name": None, "tool_args": None, "tool_result": None}
             async for chunk in main_agent.get_response_stream(
                 query=message_text,
                 session_id=session_id,
@@ -167,7 +203,8 @@ async def websocket_chat_endpoint(
                 ltm_context=ltm_context,
                 summary=summary,
                 user_info=user_info,
-                zoho_access_token=zoho_access_token
+                zoho_access_token=zoho_access_token,
+                tool_info=tool_info
             ):
                 full_response += chunk
                 await websocket.send_json({"type": "chunk", "text": chunk})
@@ -179,7 +216,13 @@ async def websocket_chat_endpoint(
             await short_term_memory.add_message(session_id, assistant_msg_id, "assistant", full_response)
             
             # Accumulate in local list for bulk persist on disconnect
-            new_messages.append({"role": "assistant", "message": full_response})
+            new_messages.append({
+                "role": "assistant",
+                "message": full_response,
+                "tool_name": tool_info.get("tool_name"),
+                "tool_args": tool_info.get("tool_args"),
+                "tool_result": tool_info.get("tool_result")
+            })
             
             # 6. Trigger background summary worker to update running summary in Redis
             asyncio.create_task(update_running_summary(session_id, message_text, full_response))
@@ -198,7 +241,10 @@ async def websocket_chat_endpoint(
                         "user_id": user_id,
                         "session_id": session_id,
                         "role": msg["role"],
-                        "message": msg["message"]
+                        "message": msg["message"],
+                        "tool_name": msg.get("tool_name"),
+                        "tool_args": msg.get("tool_args"),
+                        "tool_result": msg.get("tool_result")
                     }
                     for msg in new_messages
                 ]

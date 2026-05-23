@@ -39,6 +39,7 @@ class Settings(BaseSettings):
 
     # Application settings
     FRONTEND_URL: str
+    AUTH_SERVICE_URL: str = "http://localhost:8001"
     ENVIRONMENT: str = "development"
 
     # Groq API

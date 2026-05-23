@@ -52,11 +52,13 @@ class MainAgent:
         ltm_context: list[dict],
         summary: str,
         user_info: dict = None,
-        zoho_access_token: str = None
+        zoho_access_token: str = None,
+        tool_info: dict = None
     ):
         """
         Entry point for every user message. Yields string chunks to stream over WebSocket.
         """
+        import asyncio
         # ── Step 1: Check if this is a Human-in-the-Loop confirmation/cancellation ──
         redis = await get_redis()
         pending_key = f"pending_action:{session_id}"
@@ -65,26 +67,87 @@ class MainAgent:
         if has_pending:
             normalized = query.strip().lower().rstrip(".")
             if normalized in CONFIRM_KEYWORDS:
-                # Import lazily to avoid circular imports
-                from src.agnets.action_agent import action_agent
                 if not zoho_access_token:
                     yield "⚠️ I couldn't retrieve your Zoho access token. Please reconnect or re-authenticate."
                     return
-                result = await action_agent.execute_pending_action(
-                    session_id=session_id,
-                    access_token=zoho_access_token,
-                    approved=True
-                )
-                yield result
+                
+                yield "💭 *Just give me a moment... processing your confirmation and writing to Zoho Projects.*\n\n"
+                await asyncio.sleep(0.4)
+                
+                from src.agnets.action_agent import action_graph
+                initial_state = {
+                    "operation": "execute_pending",
+                    "query": None,
+                    "session_id": session_id,
+                    "access_token": zoho_access_token,
+                    "approved": True,
+                    "action": None,
+                    "args": None,
+                    "clarification_needed": None,
+                    "tool_result": None,
+                    "response": None,
+                    "error": None
+                }
+                
+                final_response = ""
+                async for event in action_graph.astream(initial_state):
+                    if "load_and_run" in event:
+                        state = event["load_and_run"]
+                        if state.get("action"):
+                            yield f"⚙️ *Using Tool:* `{state['action']}`\n\n"
+                            await asyncio.sleep(0.4)
+                        if tool_info is not None:
+                            tool_info["tool_name"] = state.get("action")
+                            tool_info["tool_args"] = state.get("args")
+                            tool_info["tool_result"] = state.get("tool_result")
+                    elif "explain_action" in event:
+                        state = event["explain_action"]
+                        if state.get("response"):
+                            final_response = state["response"]
+                        if tool_info is not None:
+                            if state.get("action"):
+                                tool_info["tool_name"] = state.get("action")
+                            if state.get("args"):
+                                tool_info["tool_args"] = state.get("args")
+                            if state.get("tool_result"):
+                                tool_info["tool_result"] = state.get("tool_result")
+                
+                if final_response:
+                    yield final_response
                 return
+                
             elif normalized in DECLINE_KEYWORDS:
-                from src.agnets.action_agent import action_agent
-                result = await action_agent.execute_pending_action(
-                    session_id=session_id,
-                    access_token=zoho_access_token,
-                    approved=False
-                )
-                yield result
+                if not zoho_access_token:
+                    yield "⚠️ I couldn't retrieve your Zoho access token. Please reconnect or re-authenticate."
+                    return
+                
+                yield "💭 *Just give me a moment... canceling your pending write action cleanly.*\n\n"
+                await asyncio.sleep(0.4)
+                
+                from src.agnets.action_agent import action_graph
+                initial_state = {
+                    "operation": "execute_pending",
+                    "query": None,
+                    "session_id": session_id,
+                    "access_token": zoho_access_token,
+                    "approved": False,
+                    "action": None,
+                    "args": None,
+                    "clarification_needed": None,
+                    "tool_result": None,
+                    "response": None,
+                    "error": None
+                }
+                
+                final_response = ""
+                async for event in action_graph.astream(initial_state):
+                    if "load_and_run" in event:
+                        state = event["load_and_run"]
+                        if state.get("response"):
+                            final_response = state["response"]
+                
+                if final_response:
+                    yield final_response
                 return
             else:
                 # User said something unrelated while a pending action is waiting
@@ -104,18 +167,97 @@ class MainAgent:
             if not zoho_access_token:
                 yield "⚠️ I couldn't retrieve your Zoho access token. Please reconnect or re-authenticate."
                 return
-            from src.agnets.query_agent import query_agent
-            response = await query_agent.process_query(query, zoho_access_token)
-            yield response
+            
+            yield "💭 *Just give me a moment... let me analyze your request and check Zoho Projects.*\n\n"
+            await asyncio.sleep(0.4)
+            
+            from src.agnets.query_agent import query_graph
+            initial_state = {
+                "query": query,
+                "access_token": zoho_access_token,
+                "tool": None,
+                "args": None,
+                "clarification_needed": None,
+                "tool_result": None,
+                "response": None,
+                "error": None
+            }
+            
+            final_response = ""
+            async for event in query_graph.astream(initial_state):
+                if "route_query" in event:
+                    state = event["route_query"]
+                    if state.get("tool") and not state.get("clarification_needed"):
+                        yield f"⚙️ *Using Tool:* `{state['tool']}`\n\n"
+                        await asyncio.sleep(0.4)
+                elif "execute_tool" in event:
+                    state = event["execute_tool"]
+                    if tool_info is not None:
+                        tool_info["tool_name"] = state.get("tool")
+                        tool_info["tool_args"] = state.get("args")
+                        tool_info["tool_result"] = state.get("tool_result")
+                elif "explain" in event:
+                    state = event["explain"]
+                    if state.get("response"):
+                        final_response = state["response"]
+                    if tool_info is not None:
+                        if state.get("tool"):
+                            tool_info["tool_name"] = state.get("tool")
+                        if state.get("args"):
+                            tool_info["tool_args"] = state.get("args")
+                        if state.get("tool_result"):
+                            tool_info["tool_result"] = state.get("tool_result")
+            
+            if final_response:
+                yield final_response
             return
 
         if intent == "action":
             if not zoho_access_token:
                 yield "⚠️ I couldn't retrieve your Zoho access token. Please reconnect or re-authenticate."
                 return
-            from src.agnets.action_agent import action_agent
-            response = await action_agent.initiate_action(query, session_id)
-            yield response
+            
+            yield "💭 *Just give me a moment... let me parse this action to build a scheduled task write.*\n\n"
+            await asyncio.sleep(0.4)
+            
+            from src.agnets.action_agent import action_graph
+            initial_state = {
+                "operation": "initiate",
+                "query": query,
+                "session_id": session_id,
+                "access_token": None,
+                "approved": None,
+                "action": None,
+                "args": None,
+                "clarification_needed": None,
+                "tool_result": None,
+                "response": None,
+                "error": None
+            }
+            
+            final_response = ""
+            async for event in action_graph.astream(initial_state):
+                if "parse_action" in event:
+                    state = event["parse_action"]
+                    if state.get("action") and not state.get("clarification_needed"):
+                        yield f"⚙️ *Using Tool:* `{state['action']}`\n\n"
+                        await asyncio.sleep(0.4)
+                    if tool_info is not None:
+                        tool_info["tool_name"] = state.get("action")
+                        tool_info["tool_args"] = state.get("args")
+                        tool_info["tool_result"] = None
+                elif "confirmation_prompt" in event:
+                    state = event["confirmation_prompt"]
+                    if state.get("response"):
+                        final_response = state["response"]
+                    if tool_info is not None:
+                        if state.get("action"):
+                            tool_info["tool_name"] = state.get("action")
+                        if state.get("args"):
+                            tool_info["tool_args"] = state.get("args")
+            
+            if final_response:
+                yield final_response
             return
 
         # ── Step 4: Conversational — stream directly with memory context ──

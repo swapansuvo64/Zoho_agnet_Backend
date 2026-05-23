@@ -192,3 +192,21 @@ async def get_token(request: Request):
     # Verify token is still valid before returning it
     jwt_handler.verify_token(access_token, "access")
     return {"token": access_token}
+
+@router.get("/zoho/token")
+async def get_zoho_token(
+    user_id: str = Depends(get_current_user),
+    db: AsyncClient = Depends(get_db),
+    redis: Redis = Depends(get_redis)
+):
+    try:
+        zoho_access_token = await token_manager.get_zoho_access_token(user_id, redis, db)
+        return {"zoho_access_token": zoho_access_token}
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        logger.error(f"Error fetching/refreshing Zoho token in auth-service: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error retrieving Zoho token: {str(e)}"
+        )

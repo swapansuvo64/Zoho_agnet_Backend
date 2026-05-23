@@ -33,7 +33,7 @@ class ShortTermMemory:
             await chroma_memory.add_message(session_id, message_id, role, text, embedding)
             logger.info(f"Successfully cached message {message_id} in Redis and Chroma for session {session_id}")
         except Exception as e:
-            logger.error(f"Error in short term memory add_message: {str(e)}")
+            logger.exception("Error in short term memory add_message")
 
     async def get_temporary_history(self, session_id: str) -> list[dict]:
         try:
