@@ -34,6 +34,14 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Failed to connect to Redis: {str(e)}. Proceeding anyway...")
 
+    # 3. Eagerly load fallback SentenceTransformer model
+    logger.info("Loading fallback embedding model...")
+    try:
+        from src.Config.embeddings import load_fallback_model
+        load_fallback_model()
+    except Exception as e:
+        logger.warning(f"Failed to load fallback embedding model: {str(e)}. Eager loading skipped.")
+
     logger.info("Agent service ready")
     yield
 

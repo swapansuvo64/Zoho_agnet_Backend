@@ -1,14 +1,28 @@
-import hashlib
 import httpx
 import logging
+from sentence_transformers import SentenceTransformer
 from src.Config.settings import settings
 
 logger = logging.getLogger("agent-service")
 
+# Global reference for SentenceTransformer model
+fallback_model = None
+
+def load_fallback_model():
+    global fallback_model
+    if fallback_model is None:
+        logger.info("Loading fallback SentenceTransformer model (all-MiniLM-L6-v2) eagerly...")
+        try:
+            fallback_model = SentenceTransformer("all-MiniLM-L6-v2")
+            logger.info("SentenceTransformer model loaded successfully.")
+        except Exception as e:
+            logger.error(f"Failed to load SentenceTransformer model: {str(e)}")
+            raise e
+
 async def get_embedding(text: str) -> list[float]:
     google_key = settings.GOOGLE_API_KEY
     if not google_key:
-        logger.warning("GOOGLE_API_KEY not found in settings. Using fallback embedding.")
+        logger.warning("GOOGLE_API_KEY not found in settings. Using SentenceTransformer fallback embedding.")
         return get_fallback_embedding(text)
         
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-2:embedContent?key={google_key}"
@@ -22,18 +36,21 @@ async def get_embedding(text: str) -> list[float]:
             if resp.status_code == 200:
                 return resp.json()["embedding"]["values"]
             else:
-                logger.warning(f"Google embedding API failed with status {resp.status_code}. Response: {resp.text[:200]}. Using fallback embedding.")
+                logger.warning(f"Google embedding API failed with status {resp.status_code}. Response: {resp.text[:200]}. Using SentenceTransformer fallback embedding.")
     except Exception as e:
-        logger.warning(f"Error fetching embedding from Google: {str(e)}. Using fallback embedding.")
+        logger.warning(f"Error fetching embedding from Google: {str(e)}. Using SentenceTransformer fallback embedding.")
     
     return get_fallback_embedding(text)
 
 def get_fallback_embedding(text: str) -> list[float]:
-    # Deterministic vector based on hashing string characters (dimension 3072)
-    h = hashlib.sha256(text.encode('utf-8')).digest()
-    # Generate 3072 values
-    vec = []
-    for i in range(3072):
-        val = ((h[i % 32] + i) % 256) / 255.0 - 0.5
-        vec.append(val)
-    return vec
+    global fallback_model
+    if fallback_model is None:
+        load_fallback_model()
+        
+    # Generate 384-dimensional embedding using the loaded SentenceTransformer model
+    emb = fallback_model.encode(text).tolist()
+    
+    # Pad to 3072 dimensions to match Gemini gemini-embedding-2 dimension and prevent Chroma collection dimension mismatch errors
+    if len(emb) < 3072:
+        emb = emb + [0.0] * (3072 - len(emb))
+    return emb
