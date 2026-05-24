@@ -325,8 +325,7 @@ class MainAgent:
             return
 
         # ── Step 4: Conversational — stream directly with memory context ──
-        yield "💭 *Thinking...*\n\n"
-        await asyncio.sleep(0.2)
+        # No status chunk here — the frontend ThinkingIndicator (bouncing dots) already covers the wait.
 
         stm_context_str = (
             "\n".join(f"- {c}" for c in stm_context)

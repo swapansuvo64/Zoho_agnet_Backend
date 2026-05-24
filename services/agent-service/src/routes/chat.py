@@ -276,14 +276,15 @@ async def websocket_chat_endpoint(
             except Exception as bulk_err:
                 logger.error(f"Error bulk persisting chat history to database: {str(bulk_err)}")
 
-        # Persist active summary from Redis into Supabase database, migrate to long-term memory, and clear memory caches
+        # Persist active summary, migrate STM→LTM, and clear memory caches
         if user_id:
             try:
                 redis = await get_redis()
                 redis_key = f"summary:{session_id}"
                 cached_summary = await get_value(redis, redis_key)
+
+                summary_text = ""
                 if cached_summary:
-                    summary_text = ""
                     try:
                         summary_obj = json.loads(cached_summary)
                         summary_text = summary_obj.get("summary", "")
@@ -300,53 +301,103 @@ async def websocket_chat_endpoint(
                     except Exception as summary_save_err:
                         logger.error(f"Error parsing/saving final summary: {str(summary_save_err)}")
 
-                    # Migrate the short-term memory vectors to long-term memory vector store before clearing STM
-                    try:
-                        await migrate_session_to_ltm(user_id, session_id)
-                    except Exception as migration_err:
-                        logger.error(f"Error migrating STM to LTM: {str(migration_err)}")
+                # ── Fix 1: Always migrate STM → LTM, regardless of whether a summary exists.
+                # Short sessions (1-2 msgs) may disconnect before the background summary task
+                # finishes writing to Redis, so we must not gate migration on cached_summary.
+                try:
+                    await migrate_session_to_ltm(user_id, session_id)
+                except Exception as migration_err:
+                    logger.error(f"Error migrating STM to LTM: {str(migration_err)}")
 
-                    # Vectorize the final session summary and save to LTM Chroma
-                    if summary_text:
-                        try:
-                            await vectorize_session_summary(user_id, session_id, summary_text)
-                        except Exception as sum_vec_err:
-                            logger.error(f"Error vectorizing session summary for LTM: {str(sum_vec_err)}")
-                    
-                    # Clean up Redis summary
+                # Vectorize the final session summary and save to LTM Chroma
+                if summary_text and summary_text.strip() not in ("", "No summary yet."):
+                    try:
+                        await vectorize_session_summary(user_id, session_id, summary_text)
+                    except Exception as sum_vec_err:
+                        logger.error(f"Error vectorizing session summary for LTM: {str(sum_vec_err)}")
+
+                # Clean up Redis summary
+                if cached_summary:
                     await delete_value(redis, redis_key)
+
             except Exception as redis_err:
                 logger.error(f"Error processing long-term memory updates during disconnect: {str(redis_err)}")
-        
-        # Clean up temporary Redis cache and Chroma memory collection
+
+        # ── Fix 2: Directly write any in-session messages that background tasks may not have
+        # finished writing to LTM yet (race: write_message_to_ltm tasks call get_embedding()
+        # which takes ~300-500ms; if clear_session() runs first the data is lost).
+        # We re-upsert all new_messages directly here so they are guaranteed in LTM before
+        # the STM Chroma collection is deleted.
+        if user_id and new_messages:
+            try:
+                import uuid as _uuid
+                for msg in new_messages:
+                    try:
+                        await write_message_to_ltm(
+                            user_id=user_id,
+                            session_id=session_id,
+                            msg_id=str(_uuid.uuid4()),
+                            role=msg["role"],
+                            text=msg["message"]
+                        )
+                    except Exception as ltm_write_err:
+                        logger.error(f"Error in guaranteed LTM write on disconnect: {str(ltm_write_err)}")
+                logger.info(f"Guaranteed LTM write of {len(new_messages)} messages completed for session {session_id}")
+            except Exception as e:
+                logger.error(f"Error in guaranteed LTM write loop: {str(e)}")
+
+        # Clean up temporary Redis cache and Chroma STM collection — only AFTER LTM is safe
         try:
             await short_term_memory.clear_session(session_id)
         except Exception as chroma_err:
             logger.error(f"Error cleaning up short-term memory: {str(chroma_err)}")
 
+
 @router.get("/history/{session_id}")
-async def get_session_history(session_id: str, db = Depends(get_db)):
+async def get_session_history(session_id: str, request: Request, token: str = Query(None), db = Depends(get_db)):
+    """Return chat history for a session — scoped to the authenticated user."""
     try:
+        access_token = token or request.cookies.get("access_token")
+        if not access_token:
+            return JSONResponse(content={"error": "Missing access token"}, status_code=401)
+        payload = jwt_handler.verify_token(access_token, "access")
+        user_id = payload.get("sub")
+        if not user_id:
+            return JSONResponse(content={"error": "Invalid token"}, status_code=401)
+
         res = await db.table("chat_history")\
             .select("*")\
             .eq("session_id", session_id)\
+            .eq("user_id", user_id)\
             .order("created_at", desc=False)\
             .execute()
         return JSONResponse(content={"history": res.data or []})
     except Exception as e:
+        logger.error(f"Error fetching session history: {str(e)}")
         return JSONResponse(content={"error": str(e)}, status_code=500)
 
 @router.get("/summary/{session_id}")
-async def get_session_summary(session_id: str, db = Depends(get_db)):
+async def get_session_summary(session_id: str, request: Request, token: str = Query(None), db = Depends(get_db)):
+    """Return summary for a session — scoped to the authenticated user."""
     try:
+        access_token = token or request.cookies.get("access_token")
+        if not access_token:
+            return JSONResponse(content={"error": "Missing access token"}, status_code=401)
+        payload = jwt_handler.verify_token(access_token, "access")
+        user_id = payload.get("sub")
+        if not user_id:
+            return JSONResponse(content={"error": "Invalid token"}, status_code=401)
+
         res = await db.table("chat_summaries")\
             .select("*")\
             .eq("session_id", session_id)\
+            .eq("user_id", user_id)\
             .execute()
         if res.data:
             return JSONResponse(content={"summary": res.data[0]})
         return JSONResponse(content={"summary": None})
     except Exception as e:
+        logger.error(f"Error fetching session summary: {str(e)}")
         return JSONResponse(content={"error": str(e)}, status_code=500)
 
 @router.get("/sessions")
