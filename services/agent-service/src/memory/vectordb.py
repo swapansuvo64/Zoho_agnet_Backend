@@ -219,6 +219,32 @@ class LongTermVectorMemory:
             logger.error(f"Error searching LTM: {str(e)}")
             return []
 
+    def delete_session_from_ltm(self, user_id: str, session_id: str):
+        """
+        Deletes all LTM vectors (messages + summary) that belong to a given session_id.
+        Uses a where filter on the metadata field session_id.
+        """
+        try:
+            if not self.client:
+                return
+            name = self._get_collection_name(user_id)
+            try:
+                collection = self.client.get_collection(name=name)
+            except Exception:
+                logger.info(f"LTM collection for user {user_id} does not exist; nothing to delete.")
+                return
+
+            # Fetch all IDs where session_id matches
+            res = collection.get(where={"session_id": session_id}, include=[])
+            ids_to_delete = res.get("ids", [])
+            if ids_to_delete:
+                collection.delete(ids=ids_to_delete)
+                logger.info(f"Deleted {len(ids_to_delete)} LTM vectors for session {session_id} (user {user_id})")
+            else:
+                logger.info(f"No LTM vectors found for session {session_id} (user {user_id})")
+        except Exception as e:
+            logger.error(f"Error deleting session from LTM: {str(e)}")
+
 
 chroma_memory = ChromaMemoryManager()
 ltm_memory = LongTermVectorMemory()

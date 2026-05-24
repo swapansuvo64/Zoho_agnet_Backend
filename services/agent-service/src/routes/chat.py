@@ -487,7 +487,7 @@ async def get_user_sessions(request: Request, token: str = Query(None), db = Dep
             return JSONResponse(content={"error": "Invalid token"}, status_code=401)
         
         res = await db.table("chat_summaries")\
-            .select("session_id, summary, total_turns, created_at, updated_at")\
+            .select("session_id, summary, total_turns, created_at, updated_at, is_saved")\
             .eq("user_id", user_id)\
             .order("created_at", desc=True)\
             .execute()

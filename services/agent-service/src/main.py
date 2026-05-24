@@ -80,6 +80,9 @@ app.add_middleware(
 from src.routes.chat import router as chat_router
 app.include_router(chat_router)
 
+from src.routes.sessions import router as sessions_router
+app.include_router(sessions_router)
+
 
 @app.get("/")
 async def root():
