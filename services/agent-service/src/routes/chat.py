@@ -246,18 +246,30 @@ async def websocket_chat_endpoint(
                 await websocket.send_json({"type": "chunk", "text": chunk})
             await websocket.send_json({"type": "done"})
             
-            assistant_msg_id = str(uuid.uuid4())
-            
             # 5. Add assistant response to short-term memory cache
-            await short_term_memory.add_message(session_id, assistant_msg_id, "assistant", full_response)
+            cleaned_response = full_response
+            prefixes_to_strip = [
+                "💭 *Just give me a moment... processing your confirmation and executing batch updates on Zoho Projects in parallel.*\n\n",
+                "💭 *Just give me a moment... processing your confirmation and executing batch updates on Zoho Projects in parallel.*\r\n\r\n",
+                "💭 *Just give me a moment... processing your confirmation and writing to Zoho Projects.*\n\n",
+                "💭 *Just give me a moment... processing your confirmation and writing to Zoho Projects.*\r\n\r\n",
+                "💭 *Just give me a moment... canceling your pending write action cleanly.*\n\n",
+                "💭 *Just give me a moment... canceling your pending write action cleanly.*\r\n\r\n"
+            ]
+            for prefix in prefixes_to_strip:
+                if cleaned_response.startswith(prefix):
+                    cleaned_response = cleaned_response[len(prefix):]
+            
+            assistant_msg_id = str(uuid.uuid4())
+            await short_term_memory.add_message(session_id, assistant_msg_id, "assistant", cleaned_response)
             
             # Write assistant response to LTM immediately (background) so cross-session recall works
-            asyncio.create_task(write_message_to_ltm(user_id, session_id, assistant_msg_id, "assistant", full_response))
+            asyncio.create_task(write_message_to_ltm(user_id, session_id, assistant_msg_id, "assistant", cleaned_response))
             
             # Accumulate in local list for bulk persist on disconnect
             new_messages.append({
                 "role": "assistant",
-                "message": full_response,
+                "message": cleaned_response,
                 "tool_name": tool_info.get("tool_name"),
                 "tool_args": tool_info.get("tool_args"),
                 "tool_result": tool_info.get("tool_result")

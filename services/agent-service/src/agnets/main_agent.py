@@ -27,8 +27,8 @@ class MainAgent:
 
     async def _classify_intent(self, query: str) -> str:
         """
-        Uses LLM to classify the user message into one of three intents.
-        Returns: 'query' | 'action' | 'conversational'
+        Uses LLM to classify the user message into one of four intents.
+        Returns: 'query' | 'action' | 'orchestration' | 'conversational'
         """
         messages = [
             SystemMessage(content=CLASSIFY_INTENT_PROMPT),
@@ -37,7 +37,7 @@ class MainAgent:
         try:
             resp = await llm.ainvoke(messages)
             intent = resp.content.strip().lower()
-            if intent not in ("query", "action", "conversational"):
+            if intent not in ("query", "action", "orchestration", "conversational"):
                 intent = "conversational"
             return intent
         except Exception as e:

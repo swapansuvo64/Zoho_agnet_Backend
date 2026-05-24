@@ -37,6 +37,7 @@ class BaseZohoTool:
                         _PORTAL_ID_CACHE = str(portals[0]["id"])
                         return _PORTAL_ID_CACHE
                 logger.error(f"Failed to fetch portals from Zoho: Status {resp.status_code}, Response: {resp.text}")
+                raise ValueError(f"Could not retrieve Zoho Portal ID (Status {resp.status_code}): {resp.text}")
             except Exception as e:
                 logger.error(f"Exception fetching Zoho portals: {str(e)}")
-        raise ValueError("Could not retrieve Zoho Portal ID. Please verify your auth or scopes.")
+                raise ValueError(f"Could not retrieve Zoho Portal ID (Exception): {str(e)}")
