@@ -89,7 +89,7 @@ class MainAgent:
             normalized = query.strip().lower().rstrip(".")
             if normalized in CONFIRM_KEYWORDS:
                 if not zoho_access_token:
-                    yield "⚠️ I couldn't retrieve your Zoho access token. Please reconnect or re-authenticate."
+                    yield " I couldn't retrieve your Zoho access token. Please reconnect or re-authenticate."
                     return
                 
                 yield "💭 *Just give me a moment... processing your confirmation and executing batch updates on Zoho Projects in parallel.*\n\n"
@@ -105,11 +105,11 @@ class MainAgent:
                 return
             elif normalized in DECLINE_KEYWORDS:
                 await redis.delete(pending_multi_key)
-                yield "❌ **Action Aborted.** The pending multi-task write operations have been canceled cleanly."
+                yield " **Action Aborted.** The pending multi-task write operations have been canceled cleanly."
                 return
             else:
                 yield (
-                    "⚠️ You have a **pending multi-task action** awaiting your confirmation.\n\n"
+                    " You have a **pending multi-task action** awaiting your confirmation.\n\n"
                     "Please reply **\"Yes\"** to proceed or **\"No\"** to cancel before continuing."
                 )
                 return
@@ -118,7 +118,7 @@ class MainAgent:
             normalized = query.strip().lower().rstrip(".")
             if normalized in CONFIRM_KEYWORDS:
                 if not zoho_access_token:
-                    yield "⚠️ I couldn't retrieve your Zoho access token. Please reconnect or re-authenticate."
+                    yield " I couldn't retrieve your Zoho access token. Please reconnect or re-authenticate."
                     return
                 
                 yield "💭 *Just give me a moment... processing your confirmation and writing to Zoho Projects.*\n\n"
@@ -168,7 +168,7 @@ class MainAgent:
                 
             elif normalized in DECLINE_KEYWORDS:
                 if not zoho_access_token:
-                    yield "⚠️ I couldn't retrieve your Zoho access token. Please reconnect or re-authenticate."
+                    yield " I couldn't retrieve your Zoho access token. Please reconnect or re-authenticate."
                     return
                 
                 yield "💭 *Just give me a moment... canceling your pending write action cleanly.*\n\n"
@@ -202,7 +202,7 @@ class MainAgent:
             else:
                 # User said something unrelated while a pending action is waiting
                 yield (
-                    "⚠️ You have a **pending action** awaiting your confirmation.\n\n"
+                    " You have a **pending action** awaiting your confirmation.\n\n"
                     "Please reply **\"Yes\"** to proceed or **\"No\"** to cancel before continuing."
                 )
                 return
@@ -215,7 +215,7 @@ class MainAgent:
 
         if intent == "query":
             if not zoho_access_token:
-                yield "⚠️ I couldn't retrieve your Zoho access token. Please reconnect or re-authenticate."
+                yield " I couldn't retrieve your Zoho access token. Please reconnect or re-authenticate."
                 return
             
             yield "💭 *Analyzing your request...*\n\n"
@@ -273,7 +273,7 @@ class MainAgent:
 
         if intent == "action":
             if not zoho_access_token:
-                yield "⚠️ I couldn't retrieve your Zoho access token. Please reconnect or re-authenticate."
+                yield " I couldn't retrieve your Zoho access token. Please reconnect or re-authenticate."
                 return
             
             yield "💭 *Understanding your request...*\n\n"
@@ -327,7 +327,7 @@ class MainAgent:
 
         if intent == "orchestration":
             if not zoho_access_token:
-                yield "⚠️ I couldn't retrieve your Zoho access token. Please reconnect or re-authenticate."
+                yield " I couldn't retrieve your Zoho access token. Please reconnect or re-authenticate."
                 return
             
             yield "💭 *Analyzing your multi-step request...*\n\n"

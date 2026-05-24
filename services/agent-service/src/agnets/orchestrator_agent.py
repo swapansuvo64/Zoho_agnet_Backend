@@ -194,7 +194,7 @@ class OrchestratorAgent:
                 
                 if tool_name not in QUERY_TOOLS:
                     logger.error(f"Orchestrator planned unknown tool: {tool_name}")
-                    return f"❌ Agent planning error: Unknown query tool '{tool_name}' requested."
+                    return f" Agent planning error: Unknown query tool '{tool_name}' requested."
                 
                 logger.info(f"Executing query tool '{tool_name}' with args: {tool_args}")
                 
@@ -304,7 +304,7 @@ class OrchestratorAgent:
                     
                 args_formatted = "\n".join(confirmation_details)
                 
-                confirmation_prompt = f"""### ⚠️ Human-in-the-Loop Confirmation Required
+                confirmation_prompt = f"""###  Human-in-the-Loop Confirmation Required
                 
 {plan_desc}
 
@@ -328,7 +328,7 @@ I have prepared the following **{len(actions)}** multi-task operations on Zoho P
                 return final_response
                 
         # If we exceeded max_iterations
-        return "⚠️ I attempted to complete your request, but it required too many sequential steps. Could you please be more specific or break down your instructions?"
+        return " I attempted to complete your request, but it required too many sequential steps. Could you please be more specific or break down your instructions?"
 
     async def execute_pending_actions(self, session_id: str, access_token: str, approved: bool) -> str:
         redis = await get_redis()
@@ -342,7 +342,7 @@ I have prepared the following **{len(actions)}** multi-task operations on Zoho P
         await delete_value(redis, redis_key)
         
         if not approved:
-            return "❌ **Action Aborted.** The pending multi-task write operations have been canceled cleanly."
+            return " **Action Aborted.** The pending multi-task write operations have been canceled cleanly."
             
         try:
             payload = json.loads(cached)
@@ -364,7 +364,7 @@ I have prepared the following **{len(actions)}** multi-task operations on Zoho P
             for res in results:
                 if isinstance(res, Exception):
                     fail_count += 1
-                    report_lines.append(f"| N/A | ❌ Error | Internal task run failed: {str(res)} |")
+                    report_lines.append(f"| N/A |  Error | Internal task run failed: {str(res)} |")
                     continue
                     
                 args = res["args"]
@@ -399,7 +399,7 @@ I have prepared the following **{len(actions)}** multi-task operations on Zoho P
                 else:
                     fail_count += 1
                     err_msg = run_res.get("error", "Zoho API error")
-                    report_lines.append(f"| {t_link} | ❌ Failed | {err_msg} |")
+                    report_lines.append(f"| {t_link} |  Failed | {err_msg} |")
             
             report_table = "\n".join(report_lines)
             
@@ -419,6 +419,6 @@ I have prepared the following **{len(actions)}** multi-task operations on Zoho P
             
         except Exception as e:
             logger.error(f"Error in execute_pending_actions: {str(e)}")
-            return f"❌ **Execution Failed:** An error occurred while executing the batch updates: {str(e)}"
+            return f" **Execution Failed:** An error occurred while executing the batch updates: {str(e)}"
 
 orchestrator_agent = OrchestratorAgent()

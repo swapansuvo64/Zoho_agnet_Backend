@@ -191,7 +191,7 @@ async def confirmation_prompt_node(state: ActionAgentState) -> dict:
                 
         args_formatted = "\n".join(args_details)
 
-        confirmation_prompt = f"""### ⚠️ Human-in-the-Loop Confirmation Required
+        confirmation_prompt = f"""###  Human-in-the-Loop Confirmation Required
 
 I have prepared the following write operation on Zoho Projects and need your approval to proceed:
 
@@ -226,7 +226,7 @@ async def load_and_run_node(state: ActionAgentState) -> dict:
     await delete_value(redis, redis_key)
     
     if not approved:
-        return {"response": "❌ **Action Aborted.** The pending write operation has been canceled cleanly with no changes made to Zoho Projects."}
+        return {"response": " **Action Aborted.** The pending write operation has been canceled cleanly with no changes made to Zoho Projects."}
         
     try:
         parsed = json.loads(cached)
@@ -304,7 +304,7 @@ async def load_and_run_node(state: ActionAgentState) -> dict:
 
         if not result or not result.get("success"):
             err = result.get("error", "Unknown Zoho Projects write failure") if result else "No response"
-            return {"error": f"❌ **Execution Failed:** {err}"}
+            return {"error": f" **Execution Failed:** {err}"}
             
         return {"action": action, "tool_result": result}
     except Exception as e:
