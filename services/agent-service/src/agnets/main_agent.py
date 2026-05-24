@@ -214,7 +214,8 @@ class MainAgent:
                 "error": None,
                 "stm_context": stm_context,
                 "ltm_context": ltm_context,   # ← cross-session vector DB recall
-                "summary": summary
+                "summary": summary,
+                "user_info": user_info
             }
             
             final_response = ""

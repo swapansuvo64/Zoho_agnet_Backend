@@ -2,35 +2,46 @@ import json
 
 # 1. Summary Prompts
 def get_summary_prompt(summary_data: dict, new_user_msg: str, new_agent_msg: str) -> str:
-    return f"""You are an expert conversation analyzer.
-Your task is to update the running summary of an ongoing chat between a User and an AI Assistant, and extract lists of projects mentioned, tasks mentioned, and actions taken.
+    return f"""You are an expert conversation memory analyst for a Zoho Projects AI Agent.
+Your job is to maintain a rich, structured running memory of the conversation so the agent can recall specific facts, names, decisions, and outcomes across future sessions.
 
-Current Summary State:
+Current Memory State:
 {json.dumps(summary_data, indent=2)}
 
 New messages to incorporate:
 User: {new_user_msg}
 Assistant: {new_agent_msg}
 
-Analyze the new messages and integrate them into the existing state.
-- Keep the summary concise but informative (max 3 sentences).
-- Extract any projects mentioned.
-- Extract any tasks mentioned.
-- Extract any actions taken.
-- **IMPORTANT**: When storing projects or tasks in `projects_mentioned` and `tasks_mentioned`, you MUST always capture both their Name and their 18-digit Zoho ID if present in the text, in the format: "Project Name (ID: <project_id>)" or "Task Name (ID: <task_id>)" (e.g. "mew mew (ID: 457314000000069061)"). This preserves operational context across session disconnects.
-- **IMPORTANT**: When storing projects or tasks, if there are multiple, store them as comma-separated strings (e.g. "Project Alpha (ID: 123), Project Beta (ID: 456)") inside the array.
-- Keep the existing lists and add new items (do not delete old items, but avoid duplicates).
+Analyze the new messages and update ALL fields below carefully.
 
-Respond ONLY with a valid JSON object matching the format below. Do not include markdown code block formatting (like ```json), explanations, or trailing characters.
+RULES:
+- `summary`: A narrative paragraph (3–5 sentences) describing what happened, what was discussed, and what was resolved. Be specific — mention real names, task names, decisions made.
+- `user_facts`: Extract personal facts about the user: their name, nicknames/aliases (e.g. "user said their nickname is Roni"), preferences, role, or anything they explicitly shared about themselves. Keep old facts and add new ones.
+- `people_mentioned`: Names of people referenced in conversation (assignees, teammates, managers). Format: "Name (role/context if known)".
+- `projects_mentioned`: Every Zoho project discussed. Format: "Project Name (ID: <18-digit-id>)" if ID is available, else just "Project Name". Never remove old entries.
+- `tasks_mentioned`: Every Zoho task discussed. Format: "Task Name (ID: <project_id>/<task_id>)" if IDs available. Never remove old entries.
+- `actions_taken`: Every write action attempted. Format: "<action_verb> <object>: <outcome>". Examples: "Created task 'Fix login bug': SUCCESS", "Updated status of 'Deploy API' to Closed: SUCCESS", "Deleted task 'Old feature': FAILED (permission denied)", "Task creation pending user approval".
+- `decisions_made`: Key decisions or conclusions from the conversation. E.g. "User decided to close all overdue tasks", "User chose project Alpha for the new task".
+- `topics_discussed`: High-level topics covered. E.g. "task status review", "timesheet logging", "nickname introduction", "project member listing".
+
+CRITICAL: Preserve ALL existing data in each field. Only ADD new information. Never delete or overwrite previous facts.
+CRITICAL: When storing projects or tasks, always capture their 18-digit Zoho IDs if present in the agent's response.
+
+Respond ONLY with a valid JSON object. No markdown, no explanation, no trailing characters.
 
 JSON Format:
 {{
-  "summary": "updated summary text...",
-  "projects_mentioned": ["project1, project2"],
-  "tasks_mentioned": ["task1, task2"],
-  "actions_taken": ["action1", "action2"]
+  "summary": "narrative paragraph...",
+  "user_facts": ["user's real name is Suvadeep", "user's nickname is Roni"],
+  "people_mentioned": ["Alice (project member in Alpha)"],
+  "projects_mentioned": ["Alpha Project (ID: 457314000000069061)"],
+  "tasks_mentioned": ["Fix login bug (ID: 457314000000069061/457314000000075001)"],
+  "actions_taken": ["Created task 'Fix login bug' in Alpha Project: SUCCESS"],
+  "decisions_made": ["User decided to assign all open tasks to Alice"],
+  "topics_discussed": ["task creation", "nickname introduction"]
 }}
 """
+
 
 # 2. Main Agent System Prompt
 def get_main_agent_system_prompt(summary: str, stm_context_str: str, ltm_context_str: str, user_info: dict = None, chrono_context_str: str = "") -> str:
@@ -124,17 +135,20 @@ Available Tools:
 - list_project_members: List all members/people of a project (the full team). Requires 'project_id'.
 - get_task_utilisation: Get resource/timesheet logs for a task. Requires 'project_id' and 'task_id' (use "all" if the user asks for all tasks).
 
-You will receive up to three context blocks before the user query:
+You will receive up to four context blocks before the user query:
+- [Logged-in User Details]: Name and email of the user talking to the agent.
 - [Conversation entity details / Active project context]: Running summary of mentioned projects and tasks with their IDs.
 - [Recent Chat History — current session]: Semantically relevant messages from the current session.
 - [Long-term memory — past sessions, semantically relevant]: Recalled messages from past sessions via vector search.
 
 ROUTING RULES:
-1. **Resolve parameters from context before asking.** Extract 'project_id' and 'task_id' from ANY of the three context blocks above. If only one project or task is mentioned across those blocks, use its ID automatically. Do NOT ask for clarification if the ID can be inferred.
+1. **Resolve parameters from context before asking.** Extract 'project_id' and 'task_id' from ANY of the context blocks above. If only one project or task is mentioned across those blocks, use its ID automatically. Do NOT ask for clarification if the ID can be inferred.
 2. **Use context to determine the right tool.** The context blocks describe what the user has been working on — use that to understand what "this task", "the project", "that person" refers to.
 3. **Ask for clarification only as a last resort**, if a required parameter cannot be resolved from the query or any context block.
 4. **For "all tasks" utilisation**: set task_id to "all".
 5. **For listing all projects** ("show my projects", "what workspaces do I have"): use list_projects, no parameters.
+6. **Find Member/User Projects**: If the user asks which project(s) they are involved in, or asks about "suvadeep projects" or projects of a specific member/user (e.g. "which project is X in"): ALWAYS select `list_projects` (no parameters required). The list of projects returned by Zoho represents all projects the authenticated user has access to, which is the perfect starting point to list their projects and statuses. Never ask for a project ID or clarification for these queries.
+7. **Find Tasks for a Member Across Projects**: If the user is asking which tasks are assigned to a member or themselves, but has NOT specified a project, the best first step is to call `list_projects` to discover the active projects, from which the tasks can be resolved or the user can be shown the projects to select from.
 
 You must respond with ONLY a valid JSON object:
 {

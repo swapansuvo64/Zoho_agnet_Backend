@@ -27,6 +27,7 @@ class QueryAgentState(TypedDict):
     stm_context: Optional[list[str]]
     ltm_context: Optional[list[dict]]   # cross-session vector DB results
     summary: Optional[str]
+    user_info: Optional[dict]
 
 # Node 1: Router Node
 async def route_query_node(state: QueryAgentState) -> dict:
@@ -34,9 +35,14 @@ async def route_query_node(state: QueryAgentState) -> dict:
     stm_context = state.get("stm_context") or []
     ltm_context = state.get("ltm_context") or []
     summary = state.get("summary") or ""
+    user_info = state.get("user_info") or {}
     
     # Format current summary, short-term chat context, and long-term memory for the LLM
     context_str = ""
+    if user_info:
+        name = user_info.get("name")
+        email = user_info.get("email")
+        context_str += f"[Logged-in User Details]:\nName: {name or 'N/A'}, Email: {email or 'N/A'}\n\n"
     if summary:
         context_str += f"[Conversation entity details / Active project context]:\n{summary}\n\n"
     if stm_context:
@@ -194,7 +200,7 @@ class QueryAgent:
     QueryAgent handles all Zoho Project read requests.
     Implemented as a LangGraph StateGraph pipeline.
     """
-    async def process_query(self, query: str, access_token: str, stm_context: list = None, ltm_context: list = None, summary: str = None) -> str:
+    async def process_query(self, query: str, access_token: str, stm_context: list = None, ltm_context: list = None, summary: str = None, user_info: dict = None) -> str:
         initial_state = {
             "query": query,
             "access_token": access_token,
@@ -206,7 +212,8 @@ class QueryAgent:
             "error": None,
             "stm_context": stm_context or [],
             "ltm_context": ltm_context or [],
-            "summary": summary or ""
+            "summary": summary or "",
+            "user_info": user_info
         }
         try:
             final_state = await query_graph.ainvoke(initial_state)

@@ -7,7 +7,7 @@ from src.agnets.prompt import get_summary_prompt
 
 logger = logging.getLogger("agent-service")
 
-async def call_groq_llm(messages: list) -> str:
+async def call_summary_llm(messages: list) -> str:
     lc_messages = []
     for msg in messages:
         role = msg.get("role", "user")
@@ -23,7 +23,7 @@ async def call_groq_llm(messages: list) -> str:
         resp = await llm.ainvoke(lc_messages)
         return resp.content
     except Exception as e:
-        logger.error(f"Error calling ChatGroq via LangChain in summary agent: {str(e)}")
+        logger.error(f"Error calling Gemini LLM via LangChain in summary agent: {str(e)}")
         raise e
 
 async def update_running_summary(session_id: str, new_user_msg: str, new_agent_msg: str):
@@ -44,24 +44,28 @@ async def update_running_summary(session_id: str, new_user_msg: str, new_agent_m
         if not summary_data:
             summary_data = {
                 "summary": "No summary yet.",
+                "user_facts": [],
+                "people_mentioned": [],
                 "projects_mentioned": [],
                 "tasks_mentioned": [],
                 "actions_taken": [],
+                "decisions_made": [],
+                "topics_discussed": [],
                 "total_turns": 0
             }
 
         # Increment turns
         summary_data["total_turns"] = summary_data.get("total_turns", 0) + 1
 
-        # 2. Build prompt for Groq
+        # 2. Build prompt for Gemini LLM
         prompt = get_summary_prompt(summary_data, new_user_msg, new_agent_msg)
 
         messages = [
             {"role": "user", "content": prompt}
         ]
         
-        # 3. Call Groq using ChatGroq via LangChain
-        response_text = await call_groq_llm(messages)
+        # 3. Call Gemini using ChatGoogleGenerativeAI via LangChain
+        response_text = await call_summary_llm(messages)
         
         # Clean response if markdown blocks are included
         response_text = response_text.strip()
@@ -76,7 +80,12 @@ async def update_running_summary(session_id: str, new_user_msg: str, new_agent_m
         try:
             updated_state = json.loads(response_text)
             # Ensure required keys exist
-            for key in ["summary", "projects_mentioned", "tasks_mentioned", "actions_taken"]:
+            required_keys = [
+                "summary", "user_facts", "people_mentioned", 
+                "projects_mentioned", "tasks_mentioned", 
+                "actions_taken", "decisions_made", "topics_discussed"
+            ]
+            for key in required_keys:
                 if key not in updated_state:
                     updated_state[key] = summary_data.get(key)
         except Exception as parse_err:

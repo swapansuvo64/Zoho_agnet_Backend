@@ -190,6 +190,14 @@ async def websocket_chat_endpoint(
                     summary_text = summary_obj.get("summary", "No summary yet.")
                     summary_details = [f"Conversational Summary: {summary_text}"]
                     
+                    user_facts = summary_obj.get("user_facts", [])
+                    if user_facts:
+                        summary_details.append(f"User Facts & Preferences: {', '.join(user_facts)}")
+
+                    people = summary_obj.get("people_mentioned", [])
+                    if people:
+                        summary_details.append(f"People Mentioned: {', '.join(people)}")
+
                     projects = summary_obj.get("projects_mentioned", [])
                     if projects:
                         summary_details.append(f"Active Projects Mentioned: {', '.join(projects)}")
@@ -201,6 +209,14 @@ async def websocket_chat_endpoint(
                     actions = summary_obj.get("actions_taken", [])
                     if actions:
                         summary_details.append(f"Actions Taken: {', '.join(actions)}")
+
+                    decisions = summary_obj.get("decisions_made", [])
+                    if decisions:
+                        summary_details.append(f"Decisions Made: {', '.join(decisions)}")
+
+                    topics = summary_obj.get("topics_discussed", [])
+                    if topics:
+                        summary_details.append(f"Topics Discussed: {', '.join(topics)}")
                         
                     summary = "\n".join(summary_details)
                 except Exception:
@@ -310,9 +326,53 @@ async def websocket_chat_endpoint(
                     logger.error(f"Error migrating STM to LTM: {str(migration_err)}")
 
                 # Vectorize the final session summary and save to LTM Chroma
-                if summary_text and summary_text.strip() not in ("", "No summary yet."):
+                rich_summary_text = ""
+                if cached_summary:
                     try:
-                        await vectorize_session_summary(user_id, session_id, summary_text)
+                        summary_obj = json.loads(cached_summary)
+                        narrative = summary_obj.get("summary", "")
+                        if narrative and narrative.strip() not in ("", "No summary yet."):
+                            parts = [f"Session Summary Narrative:\n{narrative}"]
+                            
+                            user_facts = summary_obj.get("user_facts", [])
+                            if user_facts:
+                                parts.append("User Facts & Preferences:\n- " + "\n- ".join(user_facts))
+                                
+                            people = summary_obj.get("people_mentioned", [])
+                            if people:
+                                parts.append("Teammates / People Mentioned:\n- " + "\n- ".join(people))
+                                
+                            projects = summary_obj.get("projects_mentioned", [])
+                            if projects:
+                                parts.append("Zoho Projects Discussed:\n- " + "\n- ".join(projects))
+                                
+                            tasks = summary_obj.get("tasks_mentioned", [])
+                            if tasks:
+                                parts.append("Zoho Tasks Discussed:\n- " + "\n- ".join(tasks))
+                                
+                            actions = summary_obj.get("actions_taken", [])
+                            if actions:
+                                parts.append("Actions Taken & Outcomes:\n- " + "\n- ".join(actions))
+                                
+                            decisions = summary_obj.get("decisions_made", [])
+                            if decisions:
+                                parts.append("Decisions Made:\n- " + "\n- ".join(decisions))
+                                
+                            topics = summary_obj.get("topics_discussed", [])
+                            if topics:
+                                parts.append("Topics Covered:\n- " + "\n- ".join(topics))
+                                
+                            rich_summary_text = "\n\n".join(parts)
+                    except Exception as rich_err:
+                        logger.error(f"Error building rich summary text for LTM: {str(rich_err)}")
+
+                # Fallback to narrative text if rich text generation failed or summary was not parsed
+                if not rich_summary_text:
+                    rich_summary_text = summary_text
+
+                if rich_summary_text and rich_summary_text.strip() not in ("", "No summary yet."):
+                    try:
+                        await vectorize_session_summary(user_id, session_id, rich_summary_text)
                     except Exception as sum_vec_err:
                         logger.error(f"Error vectorizing session summary for LTM: {str(sum_vec_err)}")
 
