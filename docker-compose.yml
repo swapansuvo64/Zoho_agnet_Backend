@@ -7,6 +7,7 @@ services:
     volumes:
       - redis_data:/data
     restart: unless-stopped
+
   chromadb:
     image: chromadb/chroma:latest
     ports:
@@ -16,6 +17,53 @@ services:
     environment:
       - ANONYMIZED_TELEMETRY=False
       - IS_PERSISTENT=TRUE
+    restart: unless-stopped
+
+  auth-service:
+    build:
+      context: ./services/auth-service
+      dockerfile: Dockerfile
+    ports:
+      - "8001:8001"
+    env_file:
+      - ./services/auth-service/.env
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  zoho-service:
+    build:
+      context: ./services/zoho-service
+      dockerfile: Dockerfile
+    ports:
+      - "8003:8003"
+    env_file:
+      - ./services/zoho-service/.env
+    environment:
+      - AUTH_SERVICE_URL=http://auth-service:8001
+    depends_on:
+      - auth-service
+    restart: unless-stopped
+
+  agent-service:
+    build:
+      context: ./services/agent-service
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    env_file:
+      - ./services/agent-service/.env
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - CHROMA_HOST=chromadb
+      - CHROMA_PORT=8000
+      - AUTH_SERVICE_URL=http://auth-service:8001
+    depends_on:
+      - redis
+      - chromadb
+      - auth-service
     restart: unless-stopped
 
 volumes:
