@@ -26,7 +26,7 @@ async def call_summary_llm(messages: list) -> str:
         logger.error(f"Error calling Gemini LLM via LangChain in summary agent: {str(e)}")
         raise e
 
-async def update_running_summary(session_id: str, new_user_msg: str, new_agent_msg: str):
+async def update_running_summary(user_id: str, session_id: str, new_user_msg: str, new_agent_msg: str):
     try:
         redis = await get_redis()
         redis_key = f"summary:{session_id}"
@@ -99,5 +99,22 @@ async def update_running_summary(session_id: str, new_user_msg: str, new_agent_m
         # 4. Save back to Redis
         await set_value(redis, redis_key, json.dumps(updated_state), 86400) # 24h cache TTL
         logger.info(f"Updated running summary for session {session_id}: {updated_state['summary']}")
+
+        # 5. Save back to database directly!
+        try:
+            import importlib
+            ltm = importlib.import_module("src.memory.longterm-memory")
+            await ltm.save_chat_summary(
+                user_id=user_id,
+                session_id=session_id,
+                summary=updated_state["summary"],
+                projects_mentioned=updated_state.get("projects_mentioned", []),
+                tasks_mentioned=updated_state.get("tasks_mentioned", []),
+                actions_taken=updated_state.get("actions_taken", []),
+                total_turns=updated_state["total_turns"]
+            )
+            logger.info(f"Directly saved summary to database for session {session_id} in background task")
+        except Exception as db_err:
+            logger.error(f"Error saving summary to database in update_running_summary background task: {str(db_err)}")
     except Exception as e:
         logger.error(f"Error in background summary update for session {session_id}: {str(e)}")

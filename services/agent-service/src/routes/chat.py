@@ -48,6 +48,7 @@ from src.agnets.main_agent import main_agent
 from src.Config.database import get_db
 
 logger = logging.getLogger("agent-service")
+running_summary_tasks: dict[str, asyncio.Task] = {}
 router = APIRouter(prefix="/chat", tags=["chat"])
 
 async def get_ws_user_id(websocket: WebSocket, token: str = None) -> str:
@@ -276,7 +277,8 @@ async def websocket_chat_endpoint(
             })
             
             # 6. Trigger background summary worker to update running summary in Redis
-            asyncio.create_task(update_running_summary(session_id, message_text, full_response))
+            task = asyncio.create_task(update_running_summary(user_id, session_id, message_text, full_response))
+            running_summary_tasks[session_id] = task
 
     except WebSocketDisconnect:
         logger.info(f"WebSocket client {user_id} disconnected from session {session_id}")
@@ -304,6 +306,21 @@ async def websocket_chat_endpoint(
             except Exception as bulk_err:
                 logger.error(f"Error bulk persisting chat history to database: {str(bulk_err)}")
 
+        # Wait for any active summary task for this session to finish!
+        task = running_summary_tasks.get(session_id)
+        if task and not task.done():
+            try:
+                logger.info(f"Awaiting active summary task for session {session_id}")
+                await asyncio.wait_for(task, timeout=5.0)
+            except Exception as wait_err:
+                logger.error(f"Error waiting for summary task: {str(wait_err)}")
+        
+        if session_id in running_summary_tasks:
+            try:
+                del running_summary_tasks[session_id]
+            except Exception:
+                pass
+
         # Persist active summary, migrate STM→LTM, and clear memory caches
         if user_id:
             try:
@@ -328,6 +345,29 @@ async def websocket_chat_endpoint(
                         logger.info(f"Saved final chat summary to long-term database for session {session_id}")
                     except Exception as summary_save_err:
                         logger.error(f"Error parsing/saving final summary: {str(summary_save_err)}")
+                else:
+                    # Fallback: if cached_summary is None but we have new_messages, save a default summary so the session is not lost
+                    try:
+                        user_turns = sum(1 for m in new_messages if m.get("role") == "user")
+                        if user_turns > 0:
+                            db = await get_db()
+                            existing = await db.table("chat_summaries").select("total_turns, summary").eq("session_id", session_id).execute()
+                            prev_turns = 0
+                            existing_summary = ""
+                            if existing.data:
+                                prev_turns = existing.data[0].get("total_turns", 0)
+                                existing_summary = existing.data[0].get("summary", "")
+                            total_turns = prev_turns + user_turns
+                            summary_text = existing_summary or "New conversation"
+                            await save_chat_summary(
+                                user_id=user_id,
+                                session_id=session_id,
+                                summary=summary_text,
+                                total_turns=total_turns
+                            )
+                            logger.info(f"Saved fallback summary for session {session_id} with {total_turns} turns")
+                    except Exception as fallback_err:
+                        logger.error(f"Error saving fallback summary: {str(fallback_err)}")
 
                 # ── Fix 1: Always migrate STM → LTM, regardless of whether a summary exists.
                 # Short sessions (1-2 msgs) may disconnect before the background summary task
