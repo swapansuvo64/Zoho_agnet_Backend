@@ -12,6 +12,7 @@ from src.tools.query.list_tasks import ListTasksTool
 from src.tools.query.get_task_details import GetTaskDetailsTool
 from src.tools.query.list_project_members import ListProjectMembersTool
 from src.tools.query.get_task_utilisation import GetTaskUtilisationTool
+from src.tools.query.get_task_comments import GetTaskCommentsTool
 
 logger = logging.getLogger("agent-service")
 
@@ -142,6 +143,11 @@ async def execute_tool_node(state: QueryAgentState) -> dict:
             if not project_id or not task_id:
                 return {"error": "Both Project ID and Task ID are required to fetch resource logs."}
             tool = GetTaskUtilisationTool(access_token)
+            result = await tool.run(project_id, task_id)
+        elif tool_name == "get_task_comments":
+            if not project_id or not task_id:
+                return {"error": "Both Project ID and Task ID are required to fetch comments."}
+            tool = GetTaskCommentsTool(access_token)
             result = await tool.run(project_id, task_id)
         else:
             return {"error": "I couldn't identify the correct query tool. Could you please verify your request?"}

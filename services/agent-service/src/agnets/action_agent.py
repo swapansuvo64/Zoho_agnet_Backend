@@ -13,6 +13,7 @@ from src.tools.action.delete_task import DeleteTaskTool
 from src.tools.action.create_project import CreateProjectTool
 from src.tools.action.update_project import UpdateProjectTool
 from src.tools.action.delete_project import DeleteProjectTool
+from src.tools.action.add_task_comment import AddTaskCommentTool
 
 # Import Prompts
 from src.agnets.prompt import ACTION_PARSING_PROMPT, get_action_explanation_prompt
@@ -174,7 +175,8 @@ async def confirmation_prompt_node(state: ActionAgentState) -> dict:
             "delete_project": "Delete Project",
             "create_task": "Create Task",
             "update_task": "Update Task",
-            "delete_task": "Delete Task"
+            "delete_task": "Delete Task",
+            "add_task_comment": "Add Task Comment"
         }
         label = action_labels.get(action, "Zoho Action")
         
@@ -235,6 +237,7 @@ async def load_and_run_node(state: ActionAgentState) -> dict:
         start_date = args.get("start_date")
         end_date = args.get("end_date")
         status = args.get("status")
+        content = args.get("content")  # for add_task_comment
         
         result = None
         logger.info(f"Executing pending Zoho action '{action}' with args: {args}")
@@ -285,6 +288,13 @@ async def load_and_run_node(state: ActionAgentState) -> dict:
         elif action == "delete_task":
             tool = DeleteTaskTool(access_token)
             result = await tool.run(project_id=project_id, task_id=task_id)
+        elif action == "add_task_comment":
+            tool = AddTaskCommentTool(access_token)
+            result = await tool.run(
+                project_id=project_id,
+                task_id=task_id,
+                content=content
+            )
         else:
             return {"error": "Unknown pending action type."}
 

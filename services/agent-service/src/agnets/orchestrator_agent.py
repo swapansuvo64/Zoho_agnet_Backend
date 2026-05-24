@@ -11,6 +11,7 @@ from src.tools.query.list_tasks import ListTasksTool
 from src.tools.query.list_project_members import ListProjectMembersTool
 from src.tools.query.get_task_details import GetTaskDetailsTool
 from src.tools.query.get_task_utilisation import GetTaskUtilisationTool
+from src.tools.query.get_task_comments import GetTaskCommentsTool
 
 from src.tools.action.create_task import CreateTaskTool
 from src.tools.action.update_task import UpdateTaskTool
@@ -18,6 +19,7 @@ from src.tools.action.delete_task import DeleteTaskTool
 from src.tools.action.create_project import CreateProjectTool
 from src.tools.action.update_project import UpdateProjectTool
 from src.tools.action.delete_project import DeleteProjectTool
+from src.tools.action.add_task_comment import AddTaskCommentTool
 
 # Import Prompts
 from src.agnets.prompt import GENERAL_ORCHESTRATOR_PROMPT
@@ -30,7 +32,8 @@ QUERY_TOOLS = {
     "list_tasks": ListTasksTool,
     "list_project_members": ListProjectMembersTool,
     "get_task_details": GetTaskDetailsTool,
-    "get_task_utilisation": GetTaskUtilisationTool
+    "get_task_utilisation": GetTaskUtilisationTool,
+    "get_task_comments": GetTaskCommentsTool
 }
 
 async def run_single_action(access_token: str, action_data: dict) -> dict:
@@ -98,6 +101,14 @@ async def run_single_action(access_token: str, action_data: dict) -> dict:
         elif action == "delete_task":
             tool = DeleteTaskTool(access_token)
             res = await tool.run(project_id=project_id, task_id=task_id)
+            return {"action": action, "args": args, "result": res}
+        elif action == "add_task_comment":
+            tool = AddTaskCommentTool(access_token)
+            res = await tool.run(
+                project_id=project_id,
+                task_id=task_id,
+                content=args.get("content")
+            )
             return {"action": action, "args": args, "result": res}
         else:
             return {"action": action, "args": args, "result": {"success": False, "error": "Unknown action type"}}
@@ -200,6 +211,8 @@ class OrchestratorAgent:
                         result = await tool_instance.run(project_id=tool_args.get("project_id"), task_id=tool_args.get("task_id"))
                     elif tool_name == "get_task_utilisation":
                         result = await tool_instance.run(project_id=tool_args.get("project_id"), task_id=tool_args.get("task_id"))
+                    elif tool_name == "get_task_comments":
+                        result = await tool_instance.run(project_id=tool_args.get("project_id"), task_id=tool_args.get("task_id"))
                     else:
                         result = {"success": False, "error": "Unknown tool invocation"}
                 except Exception as run_err:
@@ -263,7 +276,8 @@ class OrchestratorAgent:
                     "delete_project": "Delete Project",
                     "create_task": "Create Task",
                     "update_task": "Update Task",
-                    "delete_task": "Delete Task"
+                    "delete_task": "Delete Task",
+                    "add_task_comment": "Add Comment"
                 }
                 
                 for idx, act in enumerate(actions, 1):

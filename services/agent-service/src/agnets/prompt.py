@@ -101,6 +101,7 @@ Available QUERY Tools (can be executed autonomously during reasoning):
 - list_project_members: {"project_id": "..."}. Lists all members of a project.
 - get_task_details: {"project_id": "...", "task_id": "..."}. Gets details of a single task.
 - get_task_utilisation: {"project_id": "...", "task_id": "..."}. Gets timesheet hours or utilisation logs (use "all" for all tasks).
+- get_task_comments: {"project_id": "...", "task_id": "..."}. Fetches all comments on a specific task.
 
 Available WRITE Actions (must be planned as a final batch, requiring user confirmation):
 - create_project: {"name": "...", "description": "...", "start_date": "...", "end_date": "..."}
@@ -109,6 +110,7 @@ Available WRITE Actions (must be planned as a final batch, requiring user confir
 - create_task: {"project_id": "...", "name": "...", "description": "...", "person_responsible": "...", "start_date": "...", "end_date": "..."}
 - update_task: {"project_id": "...", "task_id": "...", "name": "...", "description": "...", "person_responsible": "...", "start_date": "...", "end_date": "...", "status": "..."}
 - delete_task: {"project_id": "...", "task_id": "..."}
+- add_task_comment: {"project_id": "...", "task_id": "...", "content": "..."}. Adds a text comment to a task.
 
 REASONING RULES:
 1. **Analyze user query and tool history**: Review the user's original request and the step-by-step history of tools executed so far.
@@ -130,7 +132,7 @@ You must respond with ONLY a valid JSON object matching this structure:
   "thought": "Your reasoning about the current state, what you found, and what step you are taking.",
   "decision": "call_query" | "plan_write" | "finish",
   "query_tool": {
-    "name": "list_projects" | "list_tasks" | "list_project_members" | "get_task_details" | "get_task_utilisation",
+    "name": "list_projects" | "list_tasks" | "list_project_members" | "get_task_details" | "get_task_utilisation" | "get_task_comments",
     "args": {
       "project_id": "...",
       "task_id": "..."
@@ -138,7 +140,7 @@ You must respond with ONLY a valid JSON object matching this structure:
   },
   "write_actions": [
     {
-      "action": "create_task" | "update_task" | "delete_task" | "create_project" | "update_project" | "delete_project",
+      "action": "create_task" | "update_task" | "delete_task" | "create_project" | "update_project" | "delete_project" | "add_task_comment",
       "args": {
         "project_id": "...",
         "task_id": "...",
@@ -147,7 +149,8 @@ You must respond with ONLY a valid JSON object matching this structure:
         "person_responsible": "...",
         "start_date": "...",
         "end_date": "...",
-        "status": "..."
+        "status": "...",
+        "content": "...  (for add_task_comment: the comment text)"
       }
     }
   ],
@@ -165,6 +168,7 @@ Available Tools:
 - get_task_details: Get detailed info on a single task, including its assignees/owners. Requires 'project_id' and 'task_id'.
 - list_project_members: List all members/people of a project (the full team). Requires 'project_id'.
 - get_task_utilisation: Get resource/timesheet logs for a task. Requires 'project_id' and 'task_id' (use "all" if the user asks for all tasks).
+- get_task_comments: Get all comments on a specific task. Requires 'project_id' and 'task_id'.
 
 You will receive up to four context blocks before the user query:
 - [Logged-in User Details]: Name and email of the user talking to the agent.
@@ -183,7 +187,7 @@ ROUTING RULES:
 
 You must respond with ONLY a valid JSON object:
 {
-  "tool": "list_projects" | "list_tasks" | "get_task_details" | "list_project_members" | "get_task_utilisation",
+  "tool": "list_projects" | "list_tasks" | "get_task_details" | "list_project_members" | "get_task_utilisation" | "get_task_comments",
   "args": {
     "project_id": "value or null",
     "task_id": "value or null"
@@ -226,21 +230,23 @@ Available Tools:
 - create_task: Requires 'project_id' and 'name'. Optional: 'description', 'person_responsible', 'start_date', 'end_date'.
 - update_task: Requires 'project_id' and 'task_id'. Optional: 'name', 'description', 'person_responsible', 'start_date', 'end_date', 'status'.
 - delete_task: Requires 'project_id' and 'task_id'.
+- add_task_comment: Requires 'project_id', 'task_id', and 'content' (the comment text to post).
 
 You must respond with ONLY a valid JSON object matching this structure:
 {
-  "action": "create_project" | "update_project" | "delete_project" | "create_task" | "update_task" | "delete_task",
+  "action": "create_project" | "update_project" | "delete_project" | "create_task" | "update_task" | "delete_task" | "add_task_comment",
   "args": {
-    "project_id": "extracted project id or null (required for update_project, delete_project, create_task, update_task, delete_task)",
-    "task_id": "extracted task id or null (only for update_task/delete_task)",
+    "project_id": "extracted project id or null (required for update_project, delete_project, create_task, update_task, delete_task, add_task_comment)",
+    "task_id": "extracted task id or null (only for update_task/delete_task/add_task_comment)",
     "name": "extracted project or task name or null",
     "description": "extracted description or null",
     "person_responsible": "extracted user id or null (only for tasks)",
     "start_date": "extracted start date or null",
     "end_date": "extracted end date or null",
-    "status": "extracted project or task status or null (only for updates)"
+    "status": "extracted project or task status or null (only for updates)",
+    "content": "the full comment text to post (only for add_task_comment, otherwise null)"
   },
-  "clarification_needed": "If any absolutely required argument (like name for create_project/create_task, project_id for update_project/delete_project/create_task/update_task/delete_task, task_id for update_task/delete_task) is missing, write a polite prompt asking the user for it. Otherwise null."
+  "clarification_needed": "If any absolutely required argument is missing (name for create_project/create_task, project_id for most operations, task_id for update_task/delete_task/add_task_comment, content for add_task_comment), write a polite prompt. Otherwise null."
 }
 Do not include markdown wrappers (like ```json), explanations, or extra text."""
 
