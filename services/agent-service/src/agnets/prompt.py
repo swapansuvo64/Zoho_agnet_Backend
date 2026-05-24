@@ -82,8 +82,8 @@ Classify the user's message into exactly ONE of these four categories:
 
 - "query": The user wants to READ or RETRIEVE data from Zoho Projects. This includes all data retrieval follow-up requests, even if they refer to preceding/above messages or tasks (e.g., "now show its utilisation", "give me utilisation of the upper task", "show details of the above task", "get the status again").
   Examples: list projects, show tasks, get task details, who is in this project, how many tasks, what's the status, give utilisation of this task
-- "action": The user wants to WRITE, MODIFY, or DELETE data in Zoho Projects for a single task.
-  Examples: create a task, update a task, delete a task, assign someone, change status
+- "action": The user wants to WRITE, MODIFY, or DELETE data in Zoho Projects for a single task or project.
+  Examples: create a task, update a task, delete a task, assign someone, change status, create a project, update project description, delete project
 - "orchestration": The user wants to execute a complex multi-step request combining reading (retrieving tasks/details) and then conditionally writing/modifying them based on retrieved data.
   Examples: see this task and whatever task is not completed add a message as do fast, find all tasks assigned to X and set status to closed, check project Y tasks and append description
 - "conversational": The user is having general conversation, asking meta questions, or discussing past topics.
@@ -95,6 +95,9 @@ Respond with ONLY one word: query, action, orchestration, or conversational. No 
 ORCHESTRATOR_PLANNING_PROMPT = """You are the Zoho Multi-Agent Orchestrator. Your job is to analyze the user's multi-step instruction, inspect the retrieved data (e.g., project tasks), apply logical checks, and output a structured list of write actions to be executed.
 
 Available Actions:
+- create_project: Requires 'name'. Optional: 'description', 'start_date', 'end_date'.
+- update_project: Requires 'project_id'. Optional: 'name', 'description', 'start_date', 'end_date', 'status'.
+- delete_project: Requires 'project_id'.
 - create_task: Requires 'project_id' and 'name'. Optional: 'description', 'person_responsible', 'start_date', 'end_date'.
 - update_task: Requires 'project_id' and 'task_id'. Optional: 'name', 'description', 'person_responsible', 'start_date', 'end_date', 'status'.
 - delete_task: Requires 'project_id' and 'task_id'.
@@ -189,24 +192,27 @@ Always extract and use the real, complete 18-digit IDs from the Zoho response. T
 # 6. Action Parsing Prompt
 ACTION_PARSING_PROMPT = """You are the Zoho Action Parser. Your job is to analyze write requests and extract details.
 Available Tools:
+- create_project: Requires 'name'. Optional: 'description', 'start_date', 'end_date'.
+- update_project: Requires 'project_id'. Optional: 'name', 'description', 'start_date', 'end_date', 'status'.
+- delete_project: Requires 'project_id'.
 - create_task: Requires 'project_id' and 'name'. Optional: 'description', 'person_responsible', 'start_date', 'end_date'.
 - update_task: Requires 'project_id' and 'task_id'. Optional: 'name', 'description', 'person_responsible', 'start_date', 'end_date', 'status'.
 - delete_task: Requires 'project_id' and 'task_id'.
 
 You must respond with ONLY a valid JSON object matching this structure:
 {
-  "action": "create_task" | "update_task" | "delete_task",
+  "action": "create_project" | "update_project" | "delete_project" | "create_task" | "update_task" | "delete_task",
   "args": {
-    "project_id": "extracted project id or null",
-    "task_id": "extracted task id or null (only for update/delete)",
-    "name": "extracted task name or null",
+    "project_id": "extracted project id or null (required for update_project, delete_project, create_task, update_task, delete_task)",
+    "task_id": "extracted task id or null (only for update_task/delete_task)",
+    "name": "extracted project or task name or null",
     "description": "extracted description or null",
-    "person_responsible": "extracted user id or null",
+    "person_responsible": "extracted user id or null (only for tasks)",
     "start_date": "extracted start date or null",
     "end_date": "extracted end date or null",
-    "status": "extracted task status or null (only for update)"
+    "status": "extracted project or task status or null (only for updates)"
   },
-  "clarification_needed": "If any absolutely required argument (like project_id, name for create, task_id for update/delete) is missing, write a polite prompt asking the user for it. Otherwise null."
+  "clarification_needed": "If any absolutely required argument (like name for create_project/create_task, project_id for update_project/delete_project/create_task/update_task/delete_task, task_id for update_task/delete_task) is missing, write a polite prompt asking the user for it. Otherwise null."
 }
 Do not include markdown wrappers (like ```json), explanations, or extra text."""
 

@@ -7,7 +7,7 @@ class ZohoOAuth:
     def build_authorization_url(self) -> str:
         scopes = [
             "ZohoProjects.portals.READ",
-            "ZohoProjects.projects.READ",
+            "ZohoProjects.projects.ALL",
             "ZohoProjects.tasks.ALL",
             "ZohoProjects.users.READ",
             "AaaServer.profile.READ"

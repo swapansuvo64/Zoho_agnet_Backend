@@ -264,7 +264,7 @@ class MainAgent:
                 "operation": "initiate",
                 "query": query,
                 "session_id": session_id,
-                "access_token": None,
+                "access_token": zoho_access_token,
                 "approved": None,
                 "action": None,
                 "args": None,
@@ -325,14 +325,15 @@ class MainAgent:
             yield response
             return
 
-        # ── Step 4: Conversational — stream directly with memory context ──
-        # No status chunk here — the frontend ThinkingIndicator (bouncing dots) already covers the wait.
-
+        from src.utils.date_utils import get_current_date_context
+        date_context = get_current_date_context()
+        
         stm_context_str = (
             "\n".join(f"- {c}" for c in stm_context)
             if stm_context
             else "No relevant current session context found."
         )
+        stm_context_str = f"{date_context}\n\n{stm_context_str}"
 
         ltm_items = []
         for item in ltm_context:

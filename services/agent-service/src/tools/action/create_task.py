@@ -16,6 +16,36 @@ class CreateTaskTool(BaseZohoTool):
             portal_id = await self.get_portal_id()
             url = f"{self.base_url}/portal/{portal_id}/projects/{project_id}/tasks/"
             
+            # --- Robust person_responsible assignee name resolution ---
+            if person_responsible and not person_responsible.isdigit():
+                try:
+                    users_url = f"{self.base_url}/portal/{portal_id}/projects/{project_id}/users/"
+                    async with httpx.AsyncClient() as client:
+                        resp = await client.get(users_url, headers=self.headers)
+                        if resp.status_code == 200:
+                            users_data = resp.json().get("users", [])
+                            matched_user = None
+                            # Try exact match or substring match case-insensitively
+                            for u in users_data:
+                                name_val = u.get("name", "").lower()
+                                email_val = u.get("email", "").lower()
+                                search_val = person_responsible.lower()
+                                if (search_val in name_val) or (search_val in email_val) or (name_val in search_val):
+                                    matched_user = u
+                                    break
+                            if matched_user:
+                                resolved_id = matched_user.get("id") or matched_user.get("zpuid")
+                                if resolved_id:
+                                    logger.info(f"Resolved assignee name '{person_responsible}' to Zoho ID: {resolved_id}")
+                                    person_responsible = str(resolved_id)
+                except Exception as lookup_err:
+                    logger.error(f"Error resolving assignee name: {str(lookup_err)}")
+
+            # --- Robust start/end date parsing and format alignment ---
+            from src.utils.date_utils import parse_date_to_zoho
+            start_date = parse_date_to_zoho(start_date)
+            end_date = parse_date_to_zoho(end_date)
+
             # Prepare request parameters (Zoho Projects REST API accepts form data)
             data = {
                 "name": name

@@ -1,3 +1,4 @@
+from typing import Optional
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
@@ -43,7 +44,7 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = "development"
 
     # Groq API
-    GROQ_API_KEY: str
+    GROQ_API_KEY: Optional[str] = None
     MODEL: str
     FALL_BACK_MODEL: str
 

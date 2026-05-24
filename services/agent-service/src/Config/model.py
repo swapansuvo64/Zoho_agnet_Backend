@@ -6,18 +6,18 @@ logger = logging.getLogger("agent-service")
 
 logger.info("Initializing LangChain ChatGoogleGenerativeAI models...")
 
-# Primary LLM instance (Gemini 1.5 Pro - highly intelligent, excellent tool execution)
+# Primary LLM instance (Gemini - configurable via .env settings.MODEL)
 llm = ChatGoogleGenerativeAI(
     google_api_key=settings.GOOGLE_API_KEY,
-    model="gemini-1.5-pro",
+    model=settings.MODEL,
     temperature=0.7
 )
 
-# Fallback LLM instance (Gemini 1.5 Flash - fast and highly capable fallback)
+# Fallback LLM instance (Gemini - configurable via .env settings.FALL_BACK_MODEL)
 fallback_llm = ChatGoogleGenerativeAI(
     google_api_key=settings.GOOGLE_API_KEY,
-    model="gemini-1.5-flash",
+    model=settings.FALL_BACK_MODEL,
     temperature=0.7
 )
 
-logger.info("LangChain ChatGoogleGenerativeAI models initialized successfully.")
+logger.info(f"LangChain ChatGoogleGenerativeAI models initialized successfully with MODEL={settings.MODEL}.")

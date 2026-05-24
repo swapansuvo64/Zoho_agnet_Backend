@@ -38,7 +38,8 @@ async def route_query_node(state: QueryAgentState) -> dict:
     user_info = state.get("user_info") or {}
     
     # Format current summary, short-term chat context, and long-term memory for the LLM
-    context_str = ""
+    from src.utils.date_utils import get_current_date_context
+    context_str = get_current_date_context() + "\n\n"
     if user_info:
         name = user_info.get("name")
         email = user_info.get("email")
@@ -168,7 +169,10 @@ async def explain_node(state: QueryAgentState) -> dict:
     explanation_prompt = get_query_explanation_prompt(query, tool_name, json.dumps(tool_result, indent=2))
     
     try:
-        messages = [SystemMessage(content=explanation_prompt)]
+        messages = [
+            SystemMessage(content=explanation_prompt),
+            HumanMessage(content="Please format and explain the Zoho Projects query results above according to your instructions.")
+        ]
         explanation_resp = await llm.ainvoke(messages)
         return {"response": explanation_resp.content}
     except Exception as e:

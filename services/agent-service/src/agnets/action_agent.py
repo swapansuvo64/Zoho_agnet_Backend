@@ -10,6 +10,9 @@ from src.Config.redis import get_redis, set_value, delete_value, get_value
 from src.tools.action.create_task import CreateTaskTool
 from src.tools.action.update_task import UpdateTaskTool
 from src.tools.action.delete_task import DeleteTaskTool
+from src.tools.action.create_project import CreateProjectTool
+from src.tools.action.update_project import UpdateProjectTool
+from src.tools.action.delete_project import DeleteProjectTool
 
 # Import Prompts
 from src.agnets.prompt import ACTION_PARSING_PROMPT, get_action_explanation_prompt
@@ -37,8 +40,8 @@ class ActionAgentState(TypedDict):
 
 # Node 1: Entry Router
 async def entry_router_node(state: ActionAgentState) -> dict:
-    # This node just serves to branch the execution path
-    return {}
+    # Retain the operation in state to satisfy LangGraph validation of entry updates
+    return {"operation": state["operation"]}
 
 def route_decision(state: ActionAgentState) -> str:
     if state["operation"] == "initiate":
@@ -55,7 +58,8 @@ async def parse_action_node(state: ActionAgentState) -> dict:
     summary = state.get("summary") or ""
     
     # Format current summary, short-term, and long-term memory for the LLM
-    context_str = ""
+    from src.utils.date_utils import get_current_date_context
+    context_str = get_current_date_context() + "\n\n"
     if summary:
         context_str += f"[Conversation entity details / Active project context]:\n{summary}\n\n"
     if stm_context:
@@ -97,10 +101,40 @@ async def parse_action_node(state: ActionAgentState) -> dict:
         
         try:
             parsed = json.loads(resp_text)
+            action = parsed.get("action")
+            args = parsed.get("args", {}) or {}
+            clarification_needed = parsed.get("clarification_needed")
+            
+            # --- Smart Auto-Resolution for Single Task Projects ---
+            project_id = args.get("project_id")
+            task_id = args.get("task_id")
+            access_token = state.get("access_token")
+            
+            if (action in ("update_task", "delete_task")) and project_id and not task_id and access_token:
+                try:
+                    from src.tools.query.list_tasks import ListTasksTool
+                    tasks_tool = ListTasksTool(access_token)
+                    tasks_result = await tasks_tool.run(project_id)
+                    if tasks_result.get("success") and tasks_result.get("tasks"):
+                        tasks = tasks_result["tasks"]
+                        # Filter only open/active tasks
+                        open_tasks = [t for t in tasks if str(t.get("status_type", "")).lower() == "open" or not t.get("completed", False)]
+                        target_tasks = open_tasks if open_tasks else tasks
+                        
+                        if len(target_tasks) == 1:
+                            resolved_task = target_tasks[0]
+                            args["task_id"] = str(resolved_task.get("id", ""))
+                            if not args.get("name"):
+                                args["name"] = resolved_task.get("name", "")
+                            clarification_needed = None
+                            logger.info(f"Auto-resolved single task '{resolved_task.get('name')}' ({resolved_task.get('id')}) for project {project_id}")
+                except Exception as auto_err:
+                    logger.error(f"Error in action auto-resolution: {str(auto_err)}")
+
             return {
-                "action": parsed.get("action"),
-                "args": parsed.get("args", {}) or {},
-                "clarification_needed": parsed.get("clarification_needed"),
+                "action": action,
+                "args": args,
+                "clarification_needed": clarification_needed,
                 "error": None
             }
         except Exception as parse_err:
@@ -135,6 +169,9 @@ async def confirmation_prompt_node(state: ActionAgentState) -> dict:
         
         # Generate a gorgeous confirmation card
         action_labels = {
+            "create_project": "Create Project",
+            "update_project": "Update Project",
+            "delete_project": "Delete Project",
             "create_task": "Create Task",
             "update_task": "Update Task",
             "delete_task": "Delete Task"
@@ -202,7 +239,28 @@ async def load_and_run_node(state: ActionAgentState) -> dict:
         result = None
         logger.info(f"Executing pending Zoho action '{action}' with args: {args}")
         
-        if action == "create_task":
+        if action == "create_project":
+            tool = CreateProjectTool(access_token)
+            result = await tool.run(
+                name=name,
+                description=description,
+                start_date=start_date,
+                end_date=end_date
+            )
+        elif action == "update_project":
+            tool = UpdateProjectTool(access_token)
+            result = await tool.run(
+                project_id=project_id,
+                name=name,
+                description=description,
+                start_date=start_date,
+                end_date=end_date,
+                status=status
+            )
+        elif action == "delete_project":
+            tool = DeleteProjectTool(access_token)
+            result = await tool.run(project_id=project_id)
+        elif action == "create_task":
             tool = CreateTaskTool(access_token)
             result = await tool.run(
                 project_id=project_id,
@@ -252,7 +310,8 @@ async def explain_action_node(state: ActionAgentState) -> dict:
     explanation_prompt = get_action_explanation_prompt(action, json.dumps(tool_result, indent=2))
     try:
         explanation_messages = [
-            SystemMessage(content=explanation_prompt)
+            SystemMessage(content=explanation_prompt),
+            HumanMessage(content="Please format and explain the Zoho Projects action execution success according to your instructions.")
         ]
         explanation_resp = await llm.ainvoke(explanation_messages)
         return {"response": f"✅ **Success!**\n\n{explanation_resp.content}"}

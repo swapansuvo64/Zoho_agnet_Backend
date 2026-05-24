@@ -11,6 +11,9 @@ from src.tools.query.list_tasks import ListTasksTool
 from src.tools.action.create_task import CreateTaskTool
 from src.tools.action.update_task import UpdateTaskTool
 from src.tools.action.delete_task import DeleteTaskTool
+from src.tools.action.create_project import CreateProjectTool
+from src.tools.action.update_project import UpdateProjectTool
+from src.tools.action.delete_project import DeleteProjectTool
 
 # Import Prompts
 from src.agnets.prompt import ORCHESTRATOR_PLANNING_PROMPT
@@ -29,7 +32,10 @@ async def extract_project_id(query: str, context_str: str) -> str | None:
     Do not include any explanation or extra text. Return ONLY the 18-digit project ID or "null"."""
     
     try:
-        messages = [SystemMessage(content=prompt)]
+        messages = [
+            SystemMessage(content=prompt),
+            HumanMessage(content="Please extract the Zoho Project ID according to the system instructions.")
+        ]
         resp = await llm.ainvoke(messages)
         val = resp.content.strip()
         return val if val != "null" and val.isdigit() else None
@@ -44,7 +50,10 @@ async def select_project_from_list(query: str, projects: list) -> str | None:
     
     Return ONLY the 18-digit project ID of the matching project. If no project matches, return "null"."""
     try:
-        messages = [SystemMessage(content=prompt)]
+        messages = [
+            SystemMessage(content=prompt),
+            HumanMessage(content="Please select the matching Zoho Project ID according to the system instructions.")
+        ]
         resp = await llm.ainvoke(messages)
         val = resp.content.strip()
         return val if val != "null" and val.isdigit() else None
@@ -66,7 +75,31 @@ async def run_single_action(access_token: str, action_data: dict) -> dict:
     status = args.get("status")
     
     try:
-        if action == "create_task":
+        if action == "create_project":
+            tool = CreateProjectTool(access_token)
+            res = await tool.run(
+                name=name,
+                description=description,
+                start_date=start_date,
+                end_date=end_date
+            )
+            return {"action": action, "args": args, "result": res}
+        elif action == "update_project":
+            tool = UpdateProjectTool(access_token)
+            res = await tool.run(
+                project_id=project_id,
+                name=name,
+                description=description,
+                start_date=start_date,
+                end_date=end_date,
+                status=status
+            )
+            return {"action": action, "args": args, "result": res}
+        elif action == "delete_project":
+            tool = DeleteProjectTool(access_token)
+            res = await tool.run(project_id=project_id)
+            return {"action": action, "args": args, "result": res}
+        elif action == "create_task":
             tool = CreateTaskTool(access_token)
             res = await tool.run(
                 project_id=project_id,
@@ -115,7 +148,8 @@ class OrchestratorAgent:
         summary: str = None
     ) -> str:
         # Format current context
-        context_str = ""
+        from src.utils.date_utils import get_current_date_context
+        context_str = get_current_date_context() + "\n\n"
         if summary:
             context_str += f"[Conversation entity details / Active project context]:\n{summary}\n\n"
         if stm_context:
@@ -193,6 +227,9 @@ class OrchestratorAgent:
         # Step 5: Render beautiful Confirmation Card with clickable links
         confirmation_details = []
         action_labels = {
+            "create_project": "Create Project",
+            "update_project": "Update Project",
+            "delete_project": "Delete Project",
             "create_task": "Create Task",
             "update_task": "Update Task",
             "delete_task": "Delete Task"
@@ -275,10 +312,16 @@ I have prepared the following **{len(actions)}** multi-task operations on Zoho P
                 act_type = res["action"]
                 run_res = res["result"] or {}
                 
-                t_name = args.get("name") or "Task"
+                t_name = args.get("name") or ("Project" if "project" in act_type else "Task")
                 t_id = args.get("task_id") or run_res.get("task_id")
+                p_id = args.get("project_id") or run_res.get("project_id") or project_id
                 
-                t_link = f"[{t_name}](task://{project_id}/{t_id})" if t_id else t_name
+                if t_id:
+                    t_link = f"[{t_name}](task://{p_id}/{t_id})"
+                elif p_id:
+                    t_link = f"[{t_name}](project://{p_id})"
+                else:
+                    t_link = t_name
                 
                 if run_res.get("success"):
                     success_count += 1
