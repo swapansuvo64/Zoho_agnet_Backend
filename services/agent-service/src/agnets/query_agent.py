@@ -29,6 +29,7 @@ class QueryAgentState(TypedDict):
     ltm_context: Optional[list[dict]]   # cross-session vector DB results
     summary: Optional[str]
     user_info: Optional[dict]
+    chrono_context: Optional[str]
 
 # Node 1: Router Node
 async def route_query_node(state: QueryAgentState) -> dict:
@@ -37,6 +38,7 @@ async def route_query_node(state: QueryAgentState) -> dict:
     ltm_context = state.get("ltm_context") or []
     summary = state.get("summary") or ""
     user_info = state.get("user_info") or {}
+    chrono_context = state.get("chrono_context") or ""
     
     # Format current summary, short-term chat context, and long-term memory for the LLM
     from src.utils.date_utils import get_current_date_context
@@ -47,8 +49,10 @@ async def route_query_node(state: QueryAgentState) -> dict:
         context_str += f"[Logged-in User Details]:\nName: {name or 'N/A'}, Email: {email or 'N/A'}\n\n"
     if summary:
         context_str += f"[Conversation entity details / Active project context]:\n{summary}\n\n"
+    if chrono_context:
+        context_str += f"[Current Session History (Chronological — Recent Turns)]:\n{chrono_context}\n\n"
     if stm_context:
-        context_str += "[Recent Chat History — current session]:\n"
+        context_str += "[Recent Chat History — current session (Semantic matches)]:\n"
         context_str += "\n".join(stm_context) + "\n\n"
     if ltm_context:
         ltm_lines = []
@@ -210,7 +214,7 @@ class QueryAgent:
     QueryAgent handles all Zoho Project read requests.
     Implemented as a LangGraph StateGraph pipeline.
     """
-    async def process_query(self, query: str, access_token: str, stm_context: list = None, ltm_context: list = None, summary: str = None, user_info: dict = None) -> str:
+    async def process_query(self, query: str, access_token: str, stm_context: list = None, ltm_context: list = None, summary: str = None, user_info: dict = None, chrono_context: str = None) -> str:
         initial_state = {
             "query": query,
             "access_token": access_token,
@@ -223,7 +227,8 @@ class QueryAgent:
             "stm_context": stm_context or [],
             "ltm_context": ltm_context or [],
             "summary": summary or "",
-            "user_info": user_info
+            "user_info": user_info,
+            "chrono_context": chrono_context or ""
         }
         try:
             final_state = await query_graph.ainvoke(initial_state)

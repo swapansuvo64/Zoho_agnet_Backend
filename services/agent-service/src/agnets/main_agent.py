@@ -59,6 +59,25 @@ class MainAgent:
         Entry point for every user message. Yields string chunks to stream over WebSocket.
         """
         import asyncio
+        import importlib
+        shortterm_memory_mod = importlib.import_module("src.memory.shortterm-memory")
+        short_term_memory = shortterm_memory_mod.short_term_memory
+        
+        try:
+            history = await short_term_memory.get_temporary_history(session_id)
+            past_msgs = history
+            if past_msgs and past_msgs[-1].get("message") == query:
+                past_msgs = past_msgs[:-1]
+            last_5 = past_msgs[-5:]
+            chrono_items = []
+            for msg in last_5:
+                role = "User" if msg.get("role") == "user" else "Assistant"
+                text = msg.get("message", "")
+                chrono_items.append(f"{role}: {text}")
+            chrono_context_str = "\n".join(chrono_items) if chrono_items else "No preceding messages in the current session."
+        except Exception as e:
+            logger.error(f"Error fetching chronological history: {str(e)}")
+            chrono_context_str = "No preceding messages in the current session."
         # ── Step 1: Check if this is a Human-in-the-Loop confirmation/cancellation ──
         redis = await get_redis()
         pending_key = f"pending_action:{session_id}"
@@ -215,7 +234,8 @@ class MainAgent:
                 "stm_context": stm_context,
                 "ltm_context": ltm_context,   # ← cross-session vector DB recall
                 "summary": summary,
-                "user_info": user_info
+                "user_info": user_info,
+                "chrono_context": chrono_context_str
             }
             
             final_response = ""
@@ -274,7 +294,8 @@ class MainAgent:
                 "error": None,
                 "stm_context": stm_context,
                 "ltm_context": ltm_context,   # ← cross-session vector DB recall
-                "summary": summary
+                "summary": summary,
+                "chrono_context": chrono_context_str
             }
             
             final_response = ""
@@ -320,7 +341,8 @@ class MainAgent:
                 session_id=session_id,
                 access_token=zoho_access_token,
                 stm_context=stm_context,
-                summary=summary
+                summary=summary,
+                chrono_context=chrono_context_str
             )
             yield response
             return
@@ -353,26 +375,6 @@ class MainAgent:
             if ltm_items
             else "No relevant historical past session memory found."
         )
-
-        import importlib
-        shortterm_memory_mod = importlib.import_module("src.memory.shortterm-memory")
-        short_term_memory = shortterm_memory_mod.short_term_memory
-        
-        try:
-            history = await short_term_memory.get_temporary_history(session_id)
-            past_msgs = history
-            if past_msgs and past_msgs[-1].get("message") == query:
-                past_msgs = past_msgs[:-1]
-            last_5 = past_msgs[-5:]
-            chrono_items = []
-            for msg in last_5:
-                role = "User" if msg.get("role") == "user" else "Assistant"
-                text = msg.get("message", "")
-                chrono_items.append(f"{role}: {text}")
-            chrono_context_str = "\n".join(chrono_items) if chrono_items else "No preceding messages in the current session."
-        except Exception as e:
-            logger.error(f"Error fetching chronological history: {str(e)}")
-            chrono_context_str = "No preceding messages in the current session."
 
         system_prompt = get_main_agent_system_prompt(
             summary, stm_context_str, ltm_context_str, user_info, chrono_context_str

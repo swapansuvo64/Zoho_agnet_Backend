@@ -128,15 +128,18 @@ class OrchestratorAgent:
         session_id: str,
         access_token: str,
         stm_context: list[str] = None,
-        summary: str = None
+        summary: str = None,
+        chrono_context: str = None
     ) -> str:
         # Format current context
         from src.utils.date_utils import get_current_date_context
         context_str = get_current_date_context() + "\n\n"
         if summary:
             context_str += f"[Conversation entity details / Active project context]:\n{summary}\n\n"
+        if chrono_context:
+            context_str += f"[Current Session History (Chronological — Recent Turns)]:\n{chrono_context}\n\n"
         if stm_context:
-            context_str += "[Recent Chat History context]:\n"
+            context_str += "[Recent Chat History context — Semantic matches]:\n"
             context_str += "\n".join(stm_context) + "\n\n"
 
         history = []

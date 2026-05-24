@@ -30,6 +30,7 @@ class ActionAgentState(TypedDict):
     stm_context: Optional[list[str]]
     ltm_context: Optional[list[dict]]   # cross-session vector DB results
     summary: Optional[str]
+    chrono_context: Optional[str]
     
     # Internal & Outputs
     action: Optional[str]
@@ -57,14 +58,17 @@ async def parse_action_node(state: ActionAgentState) -> dict:
     stm_context = state.get("stm_context") or []
     ltm_context = state.get("ltm_context") or []
     summary = state.get("summary") or ""
+    chrono_context = state.get("chrono_context") or ""
     
     # Format current summary, short-term, and long-term memory for the LLM
     from src.utils.date_utils import get_current_date_context
     context_str = get_current_date_context() + "\n\n"
     if summary:
         context_str += f"[Conversation entity details / Active project context]:\n{summary}\n\n"
+    if chrono_context:
+        context_str += f"[Current Session History (Chronological — Recent Turns)]:\n{chrono_context}\n\n"
     if stm_context:
-        context_str += "[Recent Chat History — current session]:\n"
+        context_str += "[Recent Chat History — current session (Semantic matches)]:\n"
         context_str += "\n".join(stm_context) + "\n\n"
     if ltm_context:
         ltm_lines = []
@@ -361,7 +365,7 @@ class ActionAgent:
     ActionAgent handles all Zoho Project write operations (create/update/delete tasks).
     Features Human-in-the-Loop workflow implemented as a LangGraph StateGraph.
     """
-    async def initiate_action(self, query: str, session_id: str, stm_context: list = None, summary: str = None) -> str:
+    async def initiate_action(self, query: str, session_id: str, stm_context: list = None, summary: str = None, chrono_context: str = None) -> str:
         """
         Parses intent and arguments from the user query, caches it as a pending action,
         and outputs a confirmation prompt.
@@ -379,7 +383,8 @@ class ActionAgent:
             "response": None,
             "error": None,
             "stm_context": stm_context or [],
-            "summary": summary or ""
+            "summary": summary or "",
+            "chrono_context": chrono_context or ""
         }
         try:
             final_state = await action_graph.ainvoke(initial_state)
